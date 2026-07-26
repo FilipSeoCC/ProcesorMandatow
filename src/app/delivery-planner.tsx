@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowDown, ArrowUp, CarFront, Check, Clock3, ExternalLink, LoaderCircle, MapPin, Navigation, Route, Sparkles } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, CarFront, Check, CheckCircle2, Clock3, ExternalLink, LoaderCircle, MapPin, Navigation, RotateCcw, Route, Sparkles, XCircle } from "lucide-react";
 import { useMemo, useState } from "react";
 import styles from "./delivery-planner.module.css";
 
@@ -30,7 +30,11 @@ export default function DeliveryPlanner() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [routeDirty, setRouteDirty] = useState(false);
+  const [completedIds, setCompletedIds] = useState<string[]>([]);
+  const [failedIds, setFailedIds] = useState<string[]>([]);
   const ordered = useMemo(() => result ? result.orderedStopIds.map((id) => deliveries.find((item) => item.id === id)).filter((item): item is Delivery => Boolean(item)) : deliveries.filter((item) => selected.includes(item.id)), [deliveries, result, selected]);
+  const currentStop = ordered.find((item) => !completedIds.includes(item.id) && !failedIds.includes(item.id));
+  const routeStarted = completedIds.length > 0 || failedIds.length > 0;
 
   function toggle(id: string) { setResult(null); setRouteDirty(false); setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }
   function move(index: number, direction: -1 | 1) {
@@ -39,6 +43,12 @@ export default function DeliveryPlanner() {
     [next[index], next[target]] = [next[target], next[index]];
     setResult((current) => current ? { ...current, orderedStopIds: next.map((item) => item.id), warning: "Kolejność zmieniona ręcznie — przelicz trasę przed startem." } : current);
     setRouteDirty(true);
+  }
+  function completeCurrent() { if (currentStop) setCompletedIds((current) => [...current, currentStop.id]); }
+  function failCurrent() { if (currentStop) setFailedIds((current) => [...current, currentStop.id]); }
+  function postponeCurrent() {
+    if (!currentStop) return;
+    setResult((current) => current ? { ...current, orderedStopIds: [...current.orderedStopIds.filter((id) => id !== currentStop.id), currentStop.id], warning: "Bieżąca dostawa została przeniesiona na koniec planu." } : current);
   }
   async function optimize() {
     const stops = deliveries.filter((item) => selected.includes(item.id));
@@ -52,7 +62,7 @@ export default function DeliveryPlanner() {
       setResult(data); setRouteDirty(false);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Nie udało się ułożyć trasy."); } finally { setLoading(false); }
   }
-  const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(depot.address)}&destination=${encodeURIComponent(depot.address)}&waypoints=${ordered.map((item) => encodeURIComponent(item.address)).join("%7C")}&travelmode=driving`;
+  const navigationUrl = currentStop ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${currentStop.latitude},${currentStop.longitude}`)}&travelmode=driving&dir_action=navigate` : "";
 
   return <div className={styles.planner}>
     <section className={styles.hero}><span>Plan dnia · Wadim</span><h1>Dostawy samochodów</h1><p>Wybierz auta z placu, a system ułoży możliwie krótką kolejność dostaw.</p><div><span><CarFront size={18} /><b>{selected.length}</b><small>wybrane auta</small></span><span><MapPin size={18} /><b>{deliveries.length}</b><small>punkty dzisiaj</small></span></div></section>
@@ -62,12 +72,13 @@ export default function DeliveryPlanner() {
       {error && <p className={styles.error}><AlertTriangle size={17} />{error}</p>}
       <button className={styles.optimize} onClick={optimize} disabled={loading || selected.length < 2}>{loading ? <LoaderCircle className={styles.spin} size={21} /> : <Sparkles size={21} />}{loading ? "Układam najlepszą trasę…" : "Zoptymalizuj trasę"}</button>
     </> : <>
-      <section className={styles.summary}><div><span><Route size={18} />{routeDirty ? "Trasa zmieniona" : "Trasa gotowa"}</span><strong>{routeDirty ? "—" : `${result.distanceKm} km`}</strong><small>{routeDirty ? "Przelicz czas i dystans przed startem" : `około ${Math.floor(result.durationMinutes / 60)} h ${result.durationMinutes % 60} min · ${ordered.length} dostawy`}</small></div><em>{result.mode === "google" ? "Google Optimization" : "Tryb demonstracyjny"}</em></section>
+      <section className={styles.summary}><div><span><Route size={18} />{routeStarted ? "Realizacja trasy" : routeDirty ? "Trasa zmieniona" : "Trasa gotowa"}</span><strong>{routeStarted ? `${completedIds.length}/${ordered.length}` : routeDirty ? "—" : `${result.distanceKm} km`}</strong><small>{routeStarted ? `${failedIds.length} nieudane · ${ordered.length - completedIds.length - failedIds.length} pozostałe` : routeDirty ? "Przelicz czas i dystans przed startem" : `około ${Math.floor(result.durationMinutes / 60)} h ${result.durationMinutes % 60} min · ${ordered.length} dostawy`}</small></div><em>{result.mode === "google" ? "Google Optimization" : "Tryb demonstracyjny"}</em></section>
       {result.warning && <p className={styles.warning}><AlertTriangle size={16} />{result.warning}</p>}
       {result.skippedStopIds.length > 0 && <p className={styles.error}><AlertTriangle size={17} />Nie udało się zaplanować: {result.skippedStopIds.map((id) => deliveries.find((item) => item.id === id)?.customer ?? id).join(", ")}. Zmień dane przed rozpoczęciem.</p>}
-      {ordered.length > 9 && <p className={styles.warning}><AlertTriangle size={16} />Google Maps na telefonie może nie otworzyć więcej niż 9 punktów. Podziel plan na dwie trasy.</p>}
-      <section className={styles.routeList}><div className={styles.routePoint}><span>START</span><div><strong>{depot.address}</strong><small>Plac floty</small></div></div>{ordered.map((delivery, index) => <article key={delivery.id}><span className={styles.stopNo}>{index + 1}</span><div><strong>{delivery.customer}</strong><b>{delivery.vehicle}</b><small>{delivery.address} · {delivery.serviceMinutes} min</small></div><span className={styles.moveButtons}><button onClick={() => move(index, -1)} disabled={index === 0} aria-label="Przenieś wyżej"><ArrowUp size={17} /></button><button onClick={() => move(index, 1)} disabled={index === ordered.length - 1} aria-label="Przenieś niżej"><ArrowDown size={17} /></button></span></article>)}<div className={styles.routePoint}><span>KONIEC</span><div><strong>{depot.address}</strong><small>Powrót na plac</small></div></div></section>
-      <div className={styles.actions}><button onClick={() => setResult(null)}>Zmień dostawy</button>{routeDirty ? <button className={styles.recalculate} onClick={optimize}><Sparkles size={18} />Przelicz trasę</button> : result.skippedStopIds.length > 0 || ordered.length > 9 ? <button disabled>Popraw plan</button> : <a href={mapsUrl} target="_blank" rel="noopener noreferrer"><Navigation size={19} />Rozpocznij<ExternalLink size={15} /></a>}</div>
+      {currentStop && !routeDirty && result.skippedStopIds.length === 0 && <section className={styles.currentStop}><span>NAJBLIŻSZA DOSTAWA</span><h2>{currentStop.customer}</h2><strong>{currentStop.vehicle}</strong><p><MapPin size={15} />{currentStop.address}</p><div><button onClick={completeCurrent}><CheckCircle2 size={18} />Auto wydane</button><button onClick={failCurrent}><XCircle size={18} />Nie dostarczono</button><button onClick={postponeCurrent}><RotateCcw size={18} />Przełóż na koniec</button></div></section>}
+      {!currentStop && !routeDirty && <section className={styles.finished}><CheckCircle2 size={30} /><h2>Trasa zakończona</h2><p>Wydano {completedIds.length} z {ordered.length} samochodów. Nieudane dostawy: {failedIds.length}.</p></section>}
+      <section className={styles.routeList}><div className={styles.routePoint}><span>START</span><div><strong>{depot.address}</strong><small>Plac floty</small></div></div>{ordered.map((delivery, index) => { const completed = completedIds.includes(delivery.id); const failed = failedIds.includes(delivery.id); const active = currentStop?.id === delivery.id; return <article key={delivery.id} className={`${completed ? styles.completedStop : ""} ${failed ? styles.failedStop : ""} ${active ? styles.activeStop : ""}`}><span className={styles.stopNo}>{completed ? <Check size={16} /> : failed ? <XCircle size={16} /> : index + 1}</span><div><strong>{delivery.customer}</strong><b>{delivery.vehicle}</b><small>{delivery.address} · {completed ? "wydano" : failed ? "nie dostarczono" : `${delivery.serviceMinutes} min`}</small></div>{!routeStarted && <span className={styles.moveButtons}><button onClick={() => move(index, -1)} disabled={index === 0} aria-label="Przenieś wyżej"><ArrowUp size={17} /></button><button onClick={() => move(index, 1)} disabled={index === ordered.length - 1} aria-label="Przenieś niżej"><ArrowDown size={17} /></button></span>}</article>})}<div className={styles.routePoint}><span>KONIEC</span><div><strong>{depot.address}</strong><small>Powrót na plac</small></div></div></section>
+      <div className={styles.actions}><button onClick={() => { setResult(null); setCompletedIds([]); setFailedIds([]); }}>Zmień dostawy</button>{routeDirty ? <button className={styles.recalculate} onClick={optimize}><Sparkles size={18} />Przelicz trasę</button> : result.skippedStopIds.length > 0 ? <button disabled>Popraw plan</button> : currentStop ? <a href={navigationUrl} target="_blank" rel="noopener noreferrer"><Navigation size={19} />Nawiguj do klienta<ExternalLink size={15} /></a> : <button disabled>Trasa zakończona</button>}</div>
     </>}
   </div>;
 }
