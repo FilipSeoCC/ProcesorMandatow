@@ -16,10 +16,12 @@ import {
   Inbox,
   LayoutDashboard,
   Menu,
+  Monitor,
   MoreHorizontal,
   ScanLine,
   Search,
   ShieldCheck,
+  Smartphone,
   Trash2,
   Upload,
   UserRound,
@@ -52,6 +54,22 @@ type CaseItem = {
 // Statuses the background OCR job can still move on from by itself —
 // worth polling for. Config/failure states need an explicit retry instead.
 const pendingOcrStatuses = new Set(["uploaded", "processing"]);
+
+type UploadPage = { id: string; file: File; name: string };
+
+function extensionOf(fileName: string) {
+  const match = fileName.match(/\.[^.]+$/);
+  return match ? match[0] : "";
+}
+
+function renamedFile(file: File, displayName: string) {
+  const trimmed = displayName.trim();
+  if (!trimmed) return file;
+  return new File([file], `${trimmed}${extensionOf(file.name)}`, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
 const retryableOcrStatuses = new Set([
   "ocr_configuration_required",
   "ocr_failed",
@@ -115,13 +133,14 @@ export default function MandatyWorkspace() {
     "cases" | "fleet" | "documents"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
+  const [desktopMode, setDesktopMode] = useState(false);
   const [caseItems, setCaseItems] = useState<CaseItem[]>(demoCases);
   const [selectedId, setSelectedId] = useState(demoCases[0].id);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"Wszystkie" | CaseStatus>("Wszystkie");
   const [scanOpen, setScanOpen] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadedPages, setUploadedPages] = useState<UploadPage[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -224,6 +243,14 @@ export default function MandatyWorkspace() {
     }
   }
 
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="viewport"]');
+    meta?.setAttribute(
+      "content",
+      desktopMode ? "width=1280" : "width=device-width, initial-scale=1",
+    );
+  }, [desktopMode]);
+
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
     event.target.value = "";
@@ -247,21 +274,26 @@ export default function MandatyWorkspace() {
       return;
     }
 
-    if (uploadedFiles.length + selectedFiles.length > 10) {
+    if (uploadedPages.length + selectedFiles.length > 10) {
       setUploadError("Jedna sprawa może zawierać maksymalnie 10 stron.");
       return;
     }
 
     setUploadError(null);
-    setUploadedFiles((current) => [...current, ...selectedFiles]);
+    setUploadedPages((current) => [
+      ...current,
+      ...selectedFiles.map((file, offset) => ({
+        id: `${Date.now()}-${current.length + offset}`,
+        file,
+        name: `Dokument ${current.length + offset + 1}`,
+      })),
+    ]);
     setProcessing(true);
     window.setTimeout(() => setProcessing(false), 700);
   }
 
-  function removeFile(index: number) {
-    setUploadedFiles((current) =>
-      current.filter((_, fileIndex) => fileIndex !== index),
-    );
+  function removePage(id: string) {
+    setUploadedPages((current) => current.filter((page) => page.id !== id));
     setUploadError(null);
   }
 
@@ -276,12 +308,14 @@ export default function MandatyWorkspace() {
   }
 
   async function uploadDesktopDocument() {
-    if (!uploadedFiles.length || uploading) return;
+    if (!uploadedPages.length || uploading) return;
     setUploading(true);
     setUploadError(null);
     try {
       const form = new FormData();
-      uploadedFiles.forEach((file) => form.append("files", file));
+      uploadedPages.forEach((page) =>
+        form.append("files", renamedFile(page.file, page.name)),
+      );
       let token: string | null = null;
       for (let index = 0; index < localStorage.length; index++) {
         const key = localStorage.key(index);
@@ -299,7 +333,7 @@ export default function MandatyWorkspace() {
       const result = await response.json();
       if (!response.ok)
         throw new Error(result.error || "Nie udało się przesłać dokumentu.");
-      setUploadedFiles([]);
+      setUploadedPages([]);
       setScanOpen(false);
       await loadDocuments(true);
     } catch (reason) {
@@ -791,6 +825,18 @@ export default function MandatyWorkspace() {
         </button>
       )}
 
+      <button
+        type="button"
+        className={styles.desktopModeToggle}
+        onClick={() => setDesktopMode((current) => !current)}
+        aria-label={
+          desktopMode ? "Przełącz na widok mobilny" : "Przełącz na widok desktopowy"
+        }
+        title={desktopMode ? "Widok mobilny" : "Widok desktopowy"}
+      >
+        {desktopMode ? <Smartphone size={17} /> : <Monitor size={17} />}
+      </button>
+
       {scanOpen && (
         <div
           className={styles.modalLayer}
@@ -876,7 +922,7 @@ export default function MandatyWorkspace() {
               </div>
             )}
 
-            {uploadedFiles.length > 0 && (
+            {uploadedPages.length > 0 && (
               <section
                 className={styles.fileSection}
                 aria-labelledby="added-pages-title"
@@ -884,31 +930,45 @@ export default function MandatyWorkspace() {
                 <div className={styles.fileSectionHeader}>
                   <div>
                     <h3 id="added-pages-title">Dodane strony</h3>
-                    <span>{uploadedFiles.length}/10</span>
+                    <span>{uploadedPages.length}/10</span>
                   </div>
-                  <small>Sprawdź kolejność przed wysłaniem</small>
+                  <small>Kliknij nazwę, aby ją zmienić</small>
                 </div>
                 <ol className={styles.fileList}>
-                  {uploadedFiles.map((file, index) => (
-                    <li key={`${file.name}-${file.lastModified}-${index}`}>
+                  {uploadedPages.map((page, index) => (
+                    <li key={page.id}>
                       <span className={styles.pageNumber}>{index + 1}</span>
                       <span className={styles.fileType}>
-                        {file.type === "application/pdf" ? (
+                        {page.file.type === "application/pdf" ? (
                           <Files size={19} />
                         ) : (
                           <ImagePlus size={19} />
                         )}
                       </span>
                       <span className={styles.fileName}>
-                        <strong>{file.name || `Zdjęcie ${index + 1}`}</strong>
+                        <input
+                          className={styles.nameInput}
+                          value={page.name}
+                          aria-label={`Nazwa strony ${index + 1}`}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            setUploadedPages((current) =>
+                              current.map((item) =>
+                                item.id === page.id
+                                  ? { ...item, name: value }
+                                  : item,
+                              ),
+                            );
+                          }}
+                        />
                         <small>
-                          {(file.size / 1024 / 1024).toFixed(1)} MB · strona{" "}
-                          {index + 1}
+                          {(page.file.size / 1024 / 1024).toFixed(1)} MB ·
+                          strona {index + 1}
                         </small>
                       </span>
                       <button
                         type="button"
-                        onClick={() => removeFile(index)}
+                        onClick={() => removePage(page.id)}
                         aria-label={`Usuń stronę ${index + 1}`}
                       >
                         <Trash2 size={18} />
@@ -936,12 +996,12 @@ export default function MandatyWorkspace() {
               </button>
               <button
                 className={styles.primaryButton}
-                disabled={uploadedFiles.length === 0 || processing || uploading}
+                disabled={uploadedPages.length === 0 || processing || uploading}
                 onClick={uploadDesktopDocument}
               >
                 <Upload size={18} />
                 {uploading ? "Przesyłanie…" : "Wyślij"}{" "}
-                {uploadedFiles.length > 0 ? `(${uploadedFiles.length})` : ""} do
+                {uploadedPages.length > 0 ? `(${uploadedPages.length})` : ""} do
                 analizy
               </button>
             </div>
