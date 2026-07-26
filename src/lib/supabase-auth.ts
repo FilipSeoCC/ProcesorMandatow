@@ -1,11 +1,11 @@
 import "server-only";
+import { getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export type AppRole = "admin" | "dispatcher" | "office" | "scanner" | "viewer";
 export type VerifiedMember = { userId: string; organizationId: string; role: AppRole; accessToken: string };
 
 export async function verifyMember(request: Request, allowed: AppRole[]): Promise<VerifiedMember | null> {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const { url: supabaseUrl, publishableKey: anonKey } = getSupabaseServerEnv();
   const authorization = request.headers.get("authorization");
   const accessToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!supabaseUrl || !anonKey || !accessToken) return null;

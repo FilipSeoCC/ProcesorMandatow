@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
+import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export const runtime = "nodejs";
 
@@ -16,15 +17,14 @@ export async function POST(request: Request) {
   if (invalid) return NextResponse.json({ error: `Nieprawidłowy plik: ${invalid.name}.` }, { status: 422 });
   if (files.reduce((sum, file) => sum + file.size, 0) > 50 * 1024 * 1024) return NextResponse.json({ error: "Dokument przekracza łączny limit 50 MB." }, { status: 413 });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const { url: supabaseUrl, secretKey: serviceKey } = getSupabaseServerEnv();
   if (!supabaseUrl || !serviceKey) return NextResponse.json({ mode: "demo", documentId: `DEMO-${crypto.randomUUID().slice(0, 8).toUpperCase()}`, pages: files.length });
 
   const member = await verifyMember(request, ["admin", "office", "scanner"]);
   if (!member) return NextResponse.json({ error: "Brak uprawnień do przesyłania dokumentów." }, { status: 401 });
 
   const documentId = crypto.randomUUID();
-  const serviceHeaders = { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` };
+  const serviceHeaders = adminHeaders(serviceKey);
   const storedPaths: string[] = [];
   try {
     for (const [index, file] of files.entries()) {
