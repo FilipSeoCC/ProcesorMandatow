@@ -499,7 +499,7 @@ export default function MandatyWorkspace() {
                 </div>
               </div>
 
-              <div className={styles.detailPanel}>
+              <div className={styles.detailPanel} key={selected.id}>
                 <div className={styles.detailHeader}>
                   <div className={styles.detailTitle}>
                     <button
