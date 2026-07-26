@@ -546,7 +546,10 @@ export default function MandatyWorkspace() {
                 </div>
               </div>
 
-              <div className={styles.detailPanel} key={selected.id}>
+              <div
+                className={styles.detailPanel}
+                key={`${selected.id}|${selected.plate}|${selected.eventAt}|${selected.sender}|${selected.ocrStatus}|${selected.customer}`}
+              >
                 <div className={styles.detailHeader}>
                   <div className={styles.detailTitle}>
                     <button
