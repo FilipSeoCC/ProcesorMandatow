@@ -46,6 +46,7 @@ type CaseItem = {
   agreement: string;
   previewUrl?: string | null;
   ocrStatus?: string;
+  ocrText?: string | null;
 };
 
 // Statuses the background OCR job can still move on from by itself —
@@ -153,6 +154,7 @@ export default function MandatyWorkspace() {
         case_number: string | null;
         sender: string | null;
         previewUrl: string | null;
+        ocr_text: string | null;
       }>;
     };
     if (!result.documents?.length) return null;
@@ -179,6 +181,7 @@ export default function MandatyWorkspace() {
       agreement: "—",
       previewUrl: document.previewUrl,
       ocrStatus: document.status,
+      ocrText: document.ocr_text,
     }));
     setCaseItems(mapped);
     setSelectedId((current) =>
@@ -630,6 +633,12 @@ export default function MandatyWorkspace() {
                         <Field label="Numer sprawy" value={selected.id} />
                         <Field label="Nadawca" value={selected.sender} wide />
                       </div>
+                      {selected.ocrText && (
+                        <details className={styles.ocrRaw}>
+                          <summary>Surowy tekst OCR</summary>
+                          <pre>{selected.ocrText}</pre>
+                        </details>
+                      )}
                     </section>
                     <section className={styles.matchCard}>
                       <div className={styles.matchIcon}>

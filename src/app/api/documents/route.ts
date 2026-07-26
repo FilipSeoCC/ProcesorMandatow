@@ -12,6 +12,7 @@ type DocumentRow = {
   case_number: string | null;
   sender: string | null;
   extraction_confidence: Record<string, number>;
+  ocr_text: string | null;
   mandate_document_pages: Array<{ storage_path: string; page_number: number }>;
 };
 
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
       { status: 503 },
     );
   const select =
-    "id,status,created_at,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,mandate_document_pages(storage_path,page_number)";
+    "id,status,created_at,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,ocr_text,mandate_document_pages(storage_path,page_number)";
   const response = await fetch(
     `${url}/rest/v1/mandate_documents?select=${encodeURIComponent(select)}&organization_id=eq.${member.organizationId}&order=created_at.desc&limit=50`,
     {

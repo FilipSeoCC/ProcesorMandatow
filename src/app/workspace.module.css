@@ -654,6 +654,28 @@
   padding: 19px 0;
   border-bottom: 1px solid var(--line);
 }
+.ocrRaw {
+  margin-top: 14px;
+}
+.ocrRaw summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--blue);
+}
+.ocrRaw pre {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #f6f8fb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 260px;
+  overflow-y: auto;
+}
 .sectionHeading {
   display: flex;
   justify-content: space-between;
