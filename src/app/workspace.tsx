@@ -27,6 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { ChangeEvent, useMemo, useState } from "react";
+import FleetManager from "./fleet-manager";
 import styles from "./workspace.module.css";
 
 type CaseStatus = "Do weryfikacji" | "Dopasowano" | "Nowa";
@@ -57,6 +58,8 @@ const statusClass: Record<CaseStatus, string> = {
 };
 
 export default function MandatyWorkspace() {
+  const [activeView, setActiveView] = useState<"cases" | "fleet">("cases");
+  const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [selectedId, setSelectedId] = useState(cases[0].id);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"Wszystkie" | CaseStatus>("Wszystkie");
@@ -126,9 +129,9 @@ export default function MandatyWorkspace() {
         </div>
         <nav className={styles.nav}>
           <a href="#" className={styles.navItem}><LayoutDashboard size={19} />Pulpit</a>
-          <a href="#sprawy" className={`${styles.navItem} ${styles.navActive}`}><Inbox size={19} />Sprawy<span className={styles.navCount}>7</span></a>
+          <button type="button" onClick={() => { setActiveView("cases"); setMobileMenu(false); }} className={`${styles.navItem} ${activeView === "cases" ? styles.navActive : ""}`}><Inbox size={19} />Sprawy<span className={styles.navCount}>7</span></button>
           <a href="#" className={styles.navItem}><FileText size={19} />Dokumenty</a>
-          <a href="#" className={styles.navItem}><UsersRound size={19} />Klienci i pojazdy</a>
+          <button type="button" onClick={() => { setActiveView("fleet"); setMobileMenu(false); }} className={`${styles.navItem} ${activeView === "fleet" ? styles.navActive : ""}`}><UsersRound size={19} />Flota</button>
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.securityNote}><ShieldCheck size={18} /><span><strong>Dane chronione</strong><small>Sesja szyfrowana</small></span></div>
@@ -139,14 +142,15 @@ export default function MandatyWorkspace() {
 
       <main id="main-content" className={styles.main}>
         <header className={styles.topbar}>
-          <div><p className={styles.eyebrow}>Operacje</p><h1>Obsługa mandatów</h1></div>
+          <div><p className={styles.eyebrow}>Operacje</p><h1>{activeView === "cases" ? "Obsługa mandatów" : "Zarządzanie flotą"}</h1></div>
           <div className={styles.topbarActions}>
             <button className={styles.helpButton}><CircleHelp size={18} />Pomoc</button>
             <button className={styles.iconButton} aria-label="Powiadomienia"><Bell size={20} /><span className={styles.notificationDot} /></button>
-            <button className={styles.primaryButton} onClick={() => setScanOpen(true)}><ScanLine size={18} />Skanuj dokument</button>
+            {activeView === "cases" ? <button className={styles.primaryButton} onClick={() => setScanOpen(true)}><ScanLine size={18} />Skanuj dokument</button> : <button className={styles.primaryButton} onClick={() => setFleetImportOpen(true)}><Upload size={18} />Importuj flotę</button>}
           </div>
         </header>
 
+        {activeView === "fleet" ? <FleetManager importOpen={fleetImportOpen} onCloseImport={() => setFleetImportOpen(false)} /> : <>
         <section className={styles.metrics} aria-label="Podsumowanie spraw">
           <Metric label="Nowe dzisiaj" value="4" detail="2 oczekują na analizę" icon={<Inbox size={19} />} />
           <Metric label="Do weryfikacji" value="3" detail="Najstarsza: 2 dni" icon={<Clock3 size={19} />} tone="amber" />
@@ -212,9 +216,10 @@ export default function MandatyWorkspace() {
             </div>
           </div>
         </section>
+        </>}
       </main>
 
-      <button className={styles.mobileScanButton} onClick={() => setScanOpen(true)}><Camera size={21} />Skanuj dokument</button>
+      {activeView === "cases" ? <button className={styles.mobileScanButton} onClick={() => setScanOpen(true)}><Camera size={21} />Skanuj dokument</button> : <button className={styles.mobileScanButton} onClick={() => setFleetImportOpen(true)}><Upload size={21} />Importuj flotę</button>}
 
       {scanOpen && (
         <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="scan-title">

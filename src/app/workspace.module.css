@@ -11,6 +11,7 @@
 
 /* Device-specific document intake: file upload on desktop, camera-first on mobile. */
 .mobileInstruction{display:none}
+.nav button.navItem{width:100%;text-align:left;cursor:pointer}
 .cameraAction{display:none}
 .sourceGrid{grid-template-columns:1fr}
 .fileAction{min-height:148px;justify-content:center;border-style:dashed;background:#f8faff}

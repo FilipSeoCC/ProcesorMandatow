@@ -10,6 +10,10 @@ Responsywny prototyp interfejsu do obsługi korespondencji mandatowej dla firmy 
 - dopasowanie użytkownika pojazdu na podstawie daty zdarzenia,
 - korekta i zatwierdzanie danych,
 - mobilne dodawanie zdjęcia lub pliku PDF/JPG.
+- kartoteka floty z aktualnym przypisaniem pojazdu do klienta,
+- import i aktualizacja pojazdów z plików CSV lub XML.
+
+Minimalny zakres importu floty: `marka`, `model`, `nr_rej`, `klient`, `data_czas`.
 
 Interfejs wykorzystuje dane przykładowe. PoC nie zawiera jeszcze backendu, OCR ani trwałego zapisu.
 
