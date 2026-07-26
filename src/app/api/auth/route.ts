@@ -1,0 +1,178 @@
+import { NextResponse } from "next/server";
+import { getSupabaseServerEnv } from "@/lib/supabase-env";
+import { verifyMember } from "@/lib/supabase-auth";
+
+type AuthSession = {
+  access_token: string;
+  refresh_token: string;
+  expires_in?: number;
+  user?: { email?: string };
+};
+const allRoles = [
+  "admin",
+  "dispatcher",
+  "office",
+  "scanner",
+  "viewer",
+] as const;
+
+function setSession(response: NextResponse, session: AuthSession) {
+  const common = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    path: "/",
+  };
+  response.cookies.set("ff-access", session.access_token, {
+    ...common,
+    maxAge: Math.max(60, session.expires_in ?? 3600),
+  });
+  response.cookies.set("ff-refresh", session.refresh_token, {
+    ...common,
+    maxAge: 60 * 60 * 24 * 30,
+  });
+}
+
+async function membership(accessToken: string) {
+  const { url, publishableKey } = getSupabaseServerEnv();
+  if (!url || !publishableKey) return null;
+  const response = await fetch(
+    `${url}/rest/v1/organization_members?select=organization_id,role&limit=1`,
+    {
+      headers: {
+        apikey: publishableKey,
+        Authorization: `Bearer ${accessToken}`,
+      },
+      cache: "no-store",
+    },
+  );
+  if (!response.ok) return null;
+  return (
+    (
+      (await response.json()) as Array<{
+        organization_id: string;
+        role: string;
+      }>
+    )[0] ?? null
+  );
+}
+
+async function bootstrap(accessToken: string, companyName: string) {
+  const { url, publishableKey } = getSupabaseServerEnv();
+  if (!url || !publishableKey) return { ok: false, schemaMissing: false };
+  const response = await fetch(`${url}/rest/v1/rpc/bootstrap_organization`, {
+    method: "POST",
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ company_name: companyName }),
+    cache: "no-store",
+  });
+  return {
+    ok: response.ok,
+    schemaMissing: response.status === 404 || response.status === 400,
+  };
+}
+
+export async function GET(request: Request) {
+  const member = await verifyMember(request, [...allRoles]);
+  if (!member)
+    return NextResponse.json({ authenticated: false }, { status: 401 });
+  return NextResponse.json({
+    authenticated: true,
+    role: member.role,
+    organizationId: member.organizationId,
+  });
+}
+
+export async function POST(request: Request) {
+  const body = (await request.json().catch(() => null)) as {
+    action?: string;
+    email?: string;
+    password?: string;
+    companyName?: string;
+  } | null;
+  const email = body?.email?.trim().toLowerCase() ?? "";
+  const password = body?.password ?? "";
+  if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 8)
+    return NextResponse.json(
+      { error: "Podaj poprawny e-mail i hasło mające minimum 8 znaków." },
+      { status: 422 },
+    );
+  const { url, publishableKey } = getSupabaseServerEnv();
+  if (!url || !publishableKey)
+    return NextResponse.json(
+      { error: "Supabase nie jest skonfigurowany." },
+      { status: 503 },
+    );
+
+  const signingUp = body?.action === "sign-up";
+  const authUrl = signingUp
+    ? `${url}/auth/v1/signup`
+    : `${url}/auth/v1/token?grant_type=password`;
+  const authResponse = await fetch(authUrl, {
+    method: "POST",
+    headers: { apikey: publishableKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+    cache: "no-store",
+  });
+  const authData = (await authResponse
+    .json()
+    .catch(() => ({}))) as Partial<AuthSession> & {
+    msg?: string;
+    message?: string;
+    error_description?: string;
+  };
+  if (!authResponse.ok)
+    return NextResponse.json(
+      {
+        error:
+          authData.msg ||
+          authData.message ||
+          authData.error_description ||
+          "Nie udało się zalogować.",
+      },
+      { status: authResponse.status === 429 ? 429 : 401 },
+    );
+  if (!authData.access_token || !authData.refresh_token)
+    return NextResponse.json(
+      {
+        confirmationRequired: true,
+        message: "Sprawdź skrzynkę e-mail i potwierdź konto.",
+      },
+      { status: 202 },
+    );
+
+  let member = await membership(authData.access_token);
+  if (!member) {
+    const created = await bootstrap(
+      authData.access_token,
+      body?.companyName?.trim() || "FlotaFlow",
+    );
+    if (!created.ok)
+      return NextResponse.json(
+        {
+          error: created.schemaMissing
+            ? "Brakuje schematu aplikacji w Supabase. Uruchom plik supabase/schema.sql w SQL Editorze."
+            : "Nie udało się utworzyć organizacji.",
+        },
+        { status: 503 },
+      );
+    member = await membership(authData.access_token);
+  }
+  const response = NextResponse.json({
+    authenticated: true,
+    role: member?.role ?? "admin",
+  });
+  setSession(response, authData as AuthSession);
+  return response;
+}
+
+export async function DELETE() {
+  const response = NextResponse.json({ authenticated: false });
+  response.cookies.set("ff-access", "", { path: "/", maxAge: 0 });
+  response.cookies.set("ff-refresh", "", { path: "/", maxAge: 0 });
+  return response;
+}

@@ -172,6 +172,11 @@ export default function MandatyWorkspace() {
     window.setTimeout(() => setSaved(false), 1800);
   }
 
+  async function signOut() {
+    await fetch("/api/auth", { method: "DELETE" });
+    window.location.reload();
+  }
+
   async function uploadDesktopDocument() {
     if (!uploadedFiles.length || uploading) return;
     setUploading(true);
@@ -281,11 +286,15 @@ export default function MandatyWorkspace() {
               <small>Sesja szyfrowana</small>
             </span>
           </div>
-          <button className={styles.profileButton}>
+          <button
+            className={styles.profileButton}
+            onClick={signOut}
+            title="Wyloguj"
+          >
             <span className={styles.avatar}>AK</span>
             <span>
-              <strong>Anna Kowalska</strong>
-              <small>Operator</small>
+              <strong>Konto użytkownika</strong>
+              <small>Kliknij, aby się wylogować</small>
             </span>
             <MoreHorizontal size={18} />
           </button>
