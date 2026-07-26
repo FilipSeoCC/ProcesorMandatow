@@ -47,10 +47,18 @@ function workloadIdentityClient(audience: string) {
   return client;
 }
 
+const datePattern =
+  /\b(?:\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})\b/g;
+
 function isoDate(value: string) {
-  const parts = value.match(/(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/);
-  if (!parts) return null;
-  const [, day, month, year] = parts;
+  const ymd = value.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/);
+  const dmy = value.match(/^(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})$/);
+  const [year, month, day] = ymd
+    ? [ymd[1], ymd[2], ymd[3]]
+    : dmy
+      ? [dmy[3], dmy[2], dmy[1]]
+      : [];
+  if (!year || !month || !day) return null;
   const date = new Date(
     `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00Z`,
   );
@@ -58,7 +66,6 @@ function isoDate(value: string) {
 }
 
 function dateNear(text: string, labels: RegExp) {
-  const datePattern = /\b\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}\b/g;
   for (const match of text.matchAll(datePattern)) {
     const context = text.slice(
       Math.max(0, (match.index ?? 0) - 100),
@@ -72,19 +79,22 @@ function dateNear(text: string, labels: RegExp) {
 export function extractMandateFields(rawText: string): ExtractedFields {
   const text = rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ");
   const plateContext = text.match(
-    /(?:nr|numer)[\s\S]{0,35}rejestracyj(?:ny|nego|nym)[\s:.-]{0,20}([A-Z]{1,3}[ -]?[A-Z0-9]{4,5})/i,
+    /(?:nr|numer)[\s\S]{0,35}rejestracyj(?:ny|nego|nym)[\s\S]{0,60}?\b([A-Z]{1,6}[ -]?[A-Z0-9]{2,6})\b/i,
   );
   const plateFallback =
     text
-      .match(/\b[A-Z]{1,3}[ -]?[A-Z0-9]{4,5}\b/g)
-      ?.find((candidate) => /\d/.test(candidate)) ?? null;
+      .match(/\b[A-Z]{1,6}[ -]?[A-Z0-9]{2,6}\b/g)
+      ?.find(
+        (candidate) => /\d/.test(candidate) && !/^nr\b/i.test(candidate),
+      ) ?? null;
   const registrationNumber =
     (plateContext?.[1] || plateFallback)?.replace(/[ -]/g, "").toUpperCase() ??
     null;
-  const eventAt = dateNear(text, /zdarzen|naruszen|wykroczen|ujawnion/i);
-  const allDates = [...text.matchAll(/\b\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}\b/g)]
+  const allDates = [...text.matchAll(datePattern)]
     .map((match) => isoDate(match[0]))
     .filter(Boolean) as string[];
+  const eventAtContext = dateNear(text, /zdarzen|naruszen|wykroczen|ujawnion/i);
+  const eventAt = eventAtContext ?? allDates[0] ?? null;
   const letterDate =
     dateNear(
       text,
@@ -94,16 +104,20 @@ export function extractMandateFields(rawText: string): ExtractedFields {
     null;
   const caseNumber =
     text.match(
-      /(?:znak|sygnatura|numer|nr)\s*(?:sprawy|pisma)?\s*[:.]?\s*([A-Z0-9][A-Z0-9/_\-.]{4,})/i,
+      /(?:znak|sygnatura|numer|nr)\s*(?:sprawy|pisma)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9/_\-.]{4,})/i,
     )?.[1] ?? null;
+  const senderLines = text
+    .split("\n")
+    .slice(0, 12)
+    .map((line) => line.trim());
   const sender =
-    text
-      .split("\n")
-      .slice(0, 12)
-      .map((line) => line.trim())
-      .find((line) =>
-        /straż miejska|inspektorat transportu|canard|policj|urząd/i.test(line),
-      ) ?? null;
+    senderLines.find((line) =>
+      /straż miejska|inspektorat transportu|canard|policj|urząd/i.test(line),
+    ) ??
+    senderLines.find((line) =>
+      /sp\.?\s*z\.?\s*[o0]\.?\s*[o0]\.?|s\.a\.|spółka/i.test(line),
+    ) ??
+    null;
   return {
     registrationNumber,
     eventAt,
@@ -112,7 +126,7 @@ export function extractMandateFields(rawText: string): ExtractedFields {
     sender,
     confidence: {
       registrationNumber: plateContext ? 0.94 : registrationNumber ? 0.68 : 0,
-      eventAt: eventAt ? 0.86 : 0,
+      eventAt: eventAtContext ? 0.86 : eventAt ? 0.4 : 0,
       letterDate: letterDate ? 0.72 : 0,
       caseNumber: caseNumber ? 0.7 : 0,
       sender: sender ? 0.76 : 0,
