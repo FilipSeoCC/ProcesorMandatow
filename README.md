@@ -15,6 +15,11 @@ Responsywny prototyp interfejsu do obsługi korespondencji mandatowej dla firmy 
 
 Minimalny zakres importu floty: `marka`, `model`, `nr_rej`, `klient`, `data_czas`.
 
+## Podział urządzeń
+
+- **telefon:** dedykowany skaner, kompletowanie stron i przekazanie dokumentu do bazy,
+- **desktop:** OCR, kolejka spraw, zarządzanie flotą, dopasowanie klienta i dalsze procesowanie korespondencji.
+
 Interfejs wykorzystuje dane przykładowe. PoC nie zawiera jeszcze backendu, OCR ani trwałego zapisu.
 
 ## Uruchomienie

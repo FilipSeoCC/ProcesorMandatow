@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { ChangeEvent, useMemo, useState } from "react";
 import FleetManager from "./fleet-manager";
+import MobileCapture from "./mobile-capture";
 import styles from "./workspace.module.css";
 
 type CaseStatus = "Do weryfikacji" | "Dopasowano" | "Nowa";
@@ -116,6 +117,7 @@ export default function MandatyWorkspace() {
 
   return (
     <div className={styles.shell}>
+      <MobileCapture />
       <header className={styles.mobileHeader}>
         <button className={styles.iconButton} onClick={() => setMobileMenu(true)} aria-label="Otwórz menu"><Menu size={22} /></button>
         <Brand compact />
