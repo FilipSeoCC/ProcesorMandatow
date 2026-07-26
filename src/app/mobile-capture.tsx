@@ -46,6 +46,7 @@ export default function MobileCapture() {
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
   const [sentMode, setSentMode] = useState<"demo" | "supabase">("demo");
+  const [ocrQueued, setOcrQueued] = useState(false);
   const [transfers, setTransfers] = useState<Transfer[]>([
     { id: "DOC-1048", pages: 2, time: "Dzisiaj, 09:14", status: "Przesłano" },
     {
@@ -106,6 +107,7 @@ export default function MobileCapture() {
     }
     setError(null);
     setSent(false);
+    setOcrQueued(false);
     setFiles((current) => [...current, ...selected]);
   }
 
@@ -138,6 +140,7 @@ export default function MobileCapture() {
       setFiles([]);
       setSending(false);
       setSentMode(result.mode === "supabase" ? "supabase" : "demo");
+      setOcrQueued(result.ocrStatus === "queued");
       setSent(true);
     } catch (reason) {
       setError(
@@ -195,7 +198,9 @@ export default function MobileCapture() {
                 </strong>
                 <small>
                   {sentMode === "supabase"
-                    ? "Pojawi się automatycznie w kolejce na komputerze."
+                    ? ocrQueued
+                      ? "Skan zapisany. OCR jest w kolejce — sprawdź wynik na komputerze za chwilę."
+                      : "Pojawi się automatycznie w kolejce na komputerze."
                     : "Pliki nie zostały zapisane — podłącz Supabase, aby uruchomić transfer."}
                 </small>
               </span>

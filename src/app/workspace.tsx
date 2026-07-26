@@ -160,12 +160,11 @@ export default function MandatyWorkspace() {
           }),
           deadline: "—",
           status:
-            document.status === "ready"
-              ? "Dopasowano"
-              : document.status === "needs_review" ||
-                  document.status === "ocr_failed"
-                ? "Do weryfikacji"
-                : "Nowa",
+            document.status === "ready" ||
+            document.status === "needs_review" ||
+            document.status === "ocr_failed"
+              ? "Do weryfikacji"
+              : "Nowa",
           customer: "—",
           agreement: "—",
           previewUrl: document.previewUrl,
