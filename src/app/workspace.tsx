@@ -78,6 +78,12 @@ export default function MandatyWorkspace() {
     event.target.value = "";
     if (selectedFiles.length === 0) return;
 
+    const unsupportedFile = selectedFiles.find((file) => !/\.(pdf|jpe?g|png|tiff?|heic|heif)$/i.test(file.name));
+    if (unsupportedFile) {
+      setUploadError(`Format pliku „${unsupportedFile.name}” nie jest obsługiwany.`);
+      return;
+    }
+
     const invalidFile = selectedFiles.find((file) => file.size > 15 * 1024 * 1024);
     if (invalidFile) {
       setUploadError(`Plik „${invalidFile.name}” przekracza limit 15 MB.`);
@@ -216,18 +222,19 @@ export default function MandatyWorkspace() {
           <div className={styles.scanModal}>
             <div className={styles.modalHandle} />
             <div className={styles.modalHeader}><div><p className={styles.eyebrow}>Nowa sprawa</p><h2 id="scan-title">Dodaj dokument</h2></div><button className={styles.iconButton} onClick={() => setScanOpen(false)} aria-label="Zamknij"><X size={21} /></button></div>
-            <p className={styles.modalIntro}>Dodaj wszystkie strony po kolei. Na iPhonie po każdym zdjęciu wrócisz tutaj, aby zrobić następne.</p>
+            <p className={`${styles.modalIntro} ${styles.desktopInstruction}`}>Dodaj gotowy skan z komputera. Możesz wskazać jeden PDF albo kilka plików graficznych.</p>
+            <p className={`${styles.modalIntro} ${styles.mobileInstruction}`}>Uruchom skaner i fotografuj strony po kolei. Po każdym zdjęciu wrócisz tutaj, aby dodać następną stronę.</p>
 
             <div className={styles.sourceGrid}>
               <label className={styles.cameraAction}>
                 <input type="file" accept="image/*,.heic,.heif" capture="environment" onChange={handleFiles} />
-                <span className={styles.cameraIcon}><Camera size={28} /></span>
-                <span><strong>Zrób zdjęcie</strong><small>Otworzy tylny aparat</small></span>
+                <span className={styles.cameraIcon}><ScanLine size={28} /></span>
+                <span><strong>Uruchom skaner</strong><small>Zeskanuj dokument tylnym aparatem</small></span>
               </label>
               <label className={styles.fileAction}>
-                <input type="file" accept="image/*,.heic,.heif,.pdf,application/pdf" multiple onChange={handleFiles} />
+                <input type="file" accept=".pdf,application/pdf,.jpg,.jpeg,.png,.tif,.tiff,.heic,.heif,image/jpeg,image/png,image/tiff,image/heic,image/heif" multiple onChange={handleFiles} />
                 <span className={styles.fileIcon}><ImagePlus size={24} /></span>
-                <span><strong>Wybierz pliki</strong><small>Zdjęcia lub PDF</small></span>
+                <span><strong>Dodaj skan z urządzenia</strong><small>PDF, JPG, PNG, TIFF lub HEIC</small></span>
               </label>
             </div>
 
