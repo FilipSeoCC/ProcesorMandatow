@@ -146,9 +146,9 @@ create policy plans_read on public.route_plans for select using(public.is_org_me
 create policy plans_write on public.route_plans for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
 create policy stops_read on public.route_stops for select using(public.is_org_member(organization_id));
 create policy stops_write on public.route_stops for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
-create policy documents_read on public.mandate_documents for select using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
+create policy documents_read on public.mandate_documents for select using(public.has_org_role(organization_id,array['admin','office','scanner','viewer']::public.app_role[]));
 create policy documents_write on public.mandate_documents for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
-create policy document_pages_read on public.mandate_document_pages for select using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
+create policy document_pages_read on public.mandate_document_pages for select using(public.has_org_role(organization_id,array['admin','office','scanner','viewer']::public.app_role[]));
 create policy document_pages_write on public.mandate_document_pages for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
 create policy audit_read on public.audit_events for select using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());

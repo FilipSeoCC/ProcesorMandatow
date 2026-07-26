@@ -17,7 +17,12 @@ type DocumentRow = {
 };
 
 export async function GET(request: Request) {
-  const member = await verifyMember(request, ["admin", "office", "scanner"]);
+  const member = await verifyMember(request, [
+    "admin",
+    "office",
+    "scanner",
+    "viewer",
+  ]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();
