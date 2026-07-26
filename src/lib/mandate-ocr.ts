@@ -1,0 +1,203 @@
+import "server-only";
+import { GoogleAuth } from "google-auth-library";
+import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+
+type OcrFile = { name: string; type: string; bytes: ArrayBuffer };
+type ExtractedFields = {
+  registrationNumber: string | null;
+  eventAt: string | null;
+  letterDate: string | null;
+  caseNumber: string | null;
+  sender: string | null;
+  confidence: Record<string, number>;
+};
+
+function documentAiConfig() {
+  const rawCredentials = process.env.GOOGLE_DOCUMENT_AI_SERVICE_ACCOUNT_JSON;
+  const processorId = process.env.GOOGLE_DOCUMENT_AI_PROCESSOR_ID;
+  const location = process.env.GOOGLE_DOCUMENT_AI_LOCATION || "eu";
+  if (!rawCredentials || !processorId) return null;
+  try {
+    const credentials = JSON.parse(rawCredentials) as {
+      project_id?: string;
+      client_email?: string;
+      private_key?: string;
+    };
+    const projectId =
+      process.env.GOOGLE_CLOUD_PROJECT_ID || credentials.project_id;
+    if (!projectId || !credentials.client_email || !credentials.private_key)
+      return null;
+    return { credentials, processorId, location, projectId };
+  } catch {
+    return null;
+  }
+}
+
+function isoDate(value: string) {
+  const parts = value.match(/(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})/);
+  if (!parts) return null;
+  const [, day, month, year] = parts;
+  const date = new Date(
+    `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}T00:00:00Z`,
+  );
+  return Number.isNaN(date.valueOf()) ? null : date.toISOString().slice(0, 10);
+}
+
+function dateNear(text: string, labels: RegExp) {
+  const datePattern = /\b\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}\b/g;
+  for (const match of text.matchAll(datePattern)) {
+    const context = text.slice(
+      Math.max(0, (match.index ?? 0) - 100),
+      (match.index ?? 0) + match[0].length + 40,
+    );
+    if (labels.test(context)) return isoDate(match[0]);
+  }
+  return null;
+}
+
+export function extractMandateFields(rawText: string): ExtractedFields {
+  const text = rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ");
+  const plateContext = text.match(
+    /(?:nr|numer)[\s\S]{0,35}rejestracyj(?:ny|nego|nym)[\s:.-]{0,20}([A-Z]{1,3}[ -]?[A-Z0-9]{4,5})/i,
+  );
+  const plateFallback =
+    text
+      .match(/\b[A-Z]{1,3}[ -]?[A-Z0-9]{4,5}\b/g)
+      ?.find((candidate) => /\d/.test(candidate)) ?? null;
+  const registrationNumber =
+    (plateContext?.[1] || plateFallback)?.replace(/[ -]/g, "").toUpperCase() ??
+    null;
+  const eventAt = dateNear(text, /zdarzen|naruszen|wykroczen|ujawnion/i);
+  const allDates = [...text.matchAll(/\b\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4}\b/g)]
+    .map((match) => isoDate(match[0]))
+    .filter(Boolean) as string[];
+  const letterDate =
+    dateNear(
+      text,
+      /wystaw|sporządz|wezwanie z dnia|miejscowość|warszawa|kraków|poznań|wrocław|gdańsk/i,
+    ) ??
+    allDates.find((date) => date !== eventAt) ??
+    null;
+  const caseNumber =
+    text.match(
+      /(?:znak|sygnatura|numer|nr)\s*(?:sprawy|pisma)?\s*[:.]?\s*([A-Z0-9][A-Z0-9/_\-.]{4,})/i,
+    )?.[1] ?? null;
+  const sender =
+    text
+      .split("\n")
+      .slice(0, 12)
+      .map((line) => line.trim())
+      .find((line) =>
+        /straż miejska|inspektorat transportu|canard|policj|urząd/i.test(line),
+      ) ?? null;
+  return {
+    registrationNumber,
+    eventAt,
+    letterDate,
+    caseNumber,
+    sender,
+    confidence: {
+      registrationNumber: plateContext ? 0.94 : registrationNumber ? 0.68 : 0,
+      eventAt: eventAt ? 0.86 : 0,
+      letterDate: letterDate ? 0.72 : 0,
+      caseNumber: caseNumber ? 0.7 : 0,
+      sender: sender ? 0.76 : 0,
+    },
+  };
+}
+
+async function readWithDocumentAi(file: OcrFile) {
+  const config = documentAiConfig();
+  if (!config) throw new Error("OCR_NOT_CONFIGURED");
+  const auth = new GoogleAuth({
+    credentials: config.credentials,
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+  });
+  const token = await auth.getAccessToken();
+  if (!token) throw new Error("OCR_AUTH_FAILED");
+  const endpoint = `https://${config.location}-documentai.googleapis.com/v1/projects/${config.projectId}/locations/${config.location}/processors/${config.processorId}:process`;
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      rawDocument: {
+        content: Buffer.from(file.bytes).toString("base64"),
+        mimeType: file.type || "application/octet-stream",
+      },
+    }),
+    signal: AbortSignal.timeout(55_000),
+  });
+  const result = (await response.json().catch(() => ({}))) as {
+    document?: { text?: string };
+    error?: { message?: string };
+  };
+  if (!response.ok)
+    throw new Error(
+      `DOCUMENT_AI_${response.status}:${result.error?.message || "processing failed"}`,
+    );
+  return result.document?.text ?? "";
+}
+
+async function updateDocument(
+  documentId: string,
+  values: Record<string, unknown>,
+) {
+  const { url, secretKey } = getSupabaseServerEnv();
+  if (!url || !secretKey) return;
+  const response = await fetch(
+    `${url}/rest/v1/mandate_documents?id=eq.${encodeURIComponent(documentId)}`,
+    {
+      method: "PATCH",
+      headers: {
+        ...adminHeaders(secretKey),
+        "Content-Type": "application/json",
+        Prefer: "return=minimal",
+      },
+      body: JSON.stringify(values),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!response.ok) throw new Error(`OCR_UPDATE_${response.status}`);
+}
+
+export async function processMandateOcr(documentId: string, files: OcrFile[]) {
+  if (!documentAiConfig()) {
+    await updateDocument(documentId, {
+      status: "ocr_configuration_required",
+      ocr_error: "Google Document AI is not configured",
+    });
+    return;
+  }
+  try {
+    await updateDocument(documentId, { status: "processing", ocr_error: "" });
+    const pageTexts = await Promise.all(files.map(readWithDocumentAi));
+    const rawText = pageTexts.join("\n\n--- PAGE ---\n\n").trim();
+    const fields = extractMandateFields(rawText);
+    const ready = Boolean(fields.registrationNumber && fields.eventAt);
+    await updateDocument(documentId, {
+      status: ready ? "ready" : "needs_review",
+      ocr_text: rawText,
+      registration_number: fields.registrationNumber,
+      event_at: fields.eventAt,
+      letter_date: fields.letterDate,
+      case_number: fields.caseNumber,
+      sender: fields.sender,
+      extraction_confidence: fields.confidence,
+      ocr_error: "",
+      processed_at: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error("Mandate OCR failed", error);
+    await updateDocument(documentId, {
+      status: "ocr_failed",
+      ocr_error:
+        error instanceof Error
+          ? error.message.slice(0, 500)
+          : "Unknown OCR error",
+      processed_at: new Date().toISOString(),
+    }).catch(() => null);
+  }
+}

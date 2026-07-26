@@ -68,6 +68,15 @@ create table if not exists public.mandate_documents (
   uploaded_by uuid references auth.users(id) on delete set null, page_count integer not null check(page_count between 1 and 10),
   status text not null default 'uploaded', created_at timestamptz not null default now(), unique(organization_id,id)
 );
+alter table public.mandate_documents add column if not exists ocr_text text not null default '';
+alter table public.mandate_documents add column if not exists registration_number text;
+alter table public.mandate_documents add column if not exists event_at date;
+alter table public.mandate_documents add column if not exists letter_date date;
+alter table public.mandate_documents add column if not exists case_number text;
+alter table public.mandate_documents add column if not exists sender text;
+alter table public.mandate_documents add column if not exists extraction_confidence jsonb not null default '{}'::jsonb;
+alter table public.mandate_documents add column if not exists ocr_error text not null default '';
+alter table public.mandate_documents add column if not exists processed_at timestamptz;
 create table if not exists public.mandate_document_pages (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   document_id uuid not null, page_number integer not null check(page_number between 1 and 10), storage_path text not null unique,

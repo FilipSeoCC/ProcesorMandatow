@@ -26,7 +26,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import FleetManager from "./fleet-manager";
 import MobileCapture from "./mobile-capture";
 import styles from "./workspace.module.css";
@@ -43,9 +43,11 @@ type CaseItem = {
   status: CaseStatus;
   customer: string;
   agreement: string;
+  previewUrl?: string | null;
+  ocrStatus?: string;
 };
 
-const cases: CaseItem[] = [
+const demoCases: CaseItem[] = [
   {
     id: "SM/8421/26",
     plate: "WI 2847K",
@@ -101,7 +103,8 @@ const statusClass: Record<CaseStatus, string> = {
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<"cases" | "fleet">("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState(cases[0].id);
+  const [caseItems, setCaseItems] = useState<CaseItem[]>(demoCases);
+  const [selectedId, setSelectedId] = useState(demoCases[0].id);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"Wszystkie" | CaseStatus>("Wszystkie");
   const [scanOpen, setScanOpen] = useState(false);
@@ -112,10 +115,11 @@ export default function MandatyWorkspace() {
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const selected = cases.find((item) => item.id === selectedId) ?? cases[0];
+  const selected =
+    caseItems.find((item) => item.id === selectedId) ?? caseItems[0];
   const filtered = useMemo(
     () =>
-      cases.filter((item) => {
+      caseItems.filter((item) => {
         const matchesQuery = `${item.plate} ${item.id} ${item.sender}`
           .toLowerCase()
           .includes(query.toLowerCase());
@@ -123,8 +127,55 @@ export default function MandatyWorkspace() {
           matchesQuery && (filter === "Wszystkie" || item.status === filter)
         );
       }),
-    [filter, query],
+    [caseItems, filter, query],
   );
+
+  useEffect(() => {
+    fetch("/api/documents", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const result = (await response.json()) as {
+          documents?: Array<{
+            id: string;
+            status: string;
+            created_at: string;
+            registration_number: string | null;
+            event_at: string | null;
+            case_number: string | null;
+            sender: string | null;
+            previewUrl: string | null;
+          }>;
+        };
+        if (!result.documents?.length) return;
+        const mapped: CaseItem[] = result.documents.map((document) => ({
+          id: document.case_number || document.id.slice(0, 13).toUpperCase(),
+          plate: document.registration_number || "OCR…",
+          sender: document.sender || "Nowy dokument z telefonu",
+          eventAt: document.event_at || "Oczekuje na OCR",
+          receivedAt: new Date(document.created_at).toLocaleString("pl-PL", {
+            day: "2-digit",
+            month: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          deadline: "—",
+          status:
+            document.status === "ready"
+              ? "Dopasowano"
+              : document.status === "needs_review" ||
+                  document.status === "ocr_failed"
+                ? "Do weryfikacji"
+                : "Nowa",
+          customer: "—",
+          agreement: "—",
+          previewUrl: document.previewUrl,
+          ocrStatus: document.status,
+        }));
+        setCaseItems(mapped);
+        setSelectedId(mapped[0].id);
+      })
+      .catch(() => null);
+  }, []);
 
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
@@ -478,14 +529,28 @@ export default function MandatyWorkspace() {
                 </div>
 
                 <div className={styles.reviewGrid}>
-                  <DocumentPreview />
+                  <DocumentPreview src={selected.previewUrl} />
                   <div className={styles.dataPane}>
                     <div className={styles.analysisBanner}>
                       <span>
                         <CheckCircle2 size={18} />
-                        <strong>Analiza zakończona</strong>
+                        <strong>
+                          {selected.ocrStatus === "ready"
+                            ? "Analiza zakończona"
+                            : selected.ocrStatus === "ocr_failed"
+                              ? "Analiza wymaga ponowienia"
+                              : selected.ocrStatus
+                                ? "Analiza w toku"
+                                : "Analiza zakończona"}
+                        </strong>
                       </span>
-                      <small>Rozpoznano 8 z 9 pól</small>
+                      <small>
+                        {selected.ocrStatus === "ready"
+                          ? "Dane OCR gotowe do weryfikacji"
+                          : selected.ocrStatus
+                            ? selected.ocrStatus.replaceAll("_", " ")
+                            : "Rozpoznano 8 z 9 pól"}
+                      </small>
                     </div>
                     <section className={styles.formSection}>
                       <div className={styles.sectionHeading}>
@@ -835,7 +900,7 @@ function Field({
   );
 }
 
-function DocumentPreview() {
+function DocumentPreview({ src }: { src?: string | null }) {
   return (
     <div className={styles.documentPane}>
       <div className={styles.documentToolbar}>
@@ -850,41 +915,51 @@ function DocumentPreview() {
         </div>
       </div>
       <div className={styles.paperWrap}>
-        <article
-          className={styles.paper}
-          aria-label="Podgląd przykładowego dokumentu"
-        >
-          <div className={styles.paperLogo}>SM</div>
-          <p className={styles.paperKicker}>STRAŻ MIEJSKA M.ST. WARSZAWY</p>
-          <div className={styles.paperRule} />
-          <p className={styles.paperDate}>Warszawa, 21 lipca 2026 r.</p>
-          <h4>
-            WEZWANIE DO WSKAZANIA
-            <br />
-            UŻYTKOWNIKA POJAZDU
-          </h4>
-          <p>
-            W związku z ujawnieniem naruszenia przepisów ruchu drogowego prosimy
-            o wskazanie osoby, której powierzono pojazd:
-          </p>
-          <div className={styles.paperHighlight}>
-            <span>Numer rejestracyjny</span>
-            <strong>WI 2847K</strong>
-          </div>
-          <div className={styles.paperHighlight}>
-            <span>Data i godzina zdarzenia</span>
-            <strong>18.07.2026, 14:32</strong>
-          </div>
-          <p className={styles.paperText}>
-            Odpowiedź należy przekazać w terminie 7 dni od dnia otrzymania
-            niniejszego pisma.
-          </p>
-          <div className={styles.paperSignature}>
-            Z upoważnienia
-            <br />
-            <strong>Starszy Inspektor</strong>
-          </div>
-        </article>
+        {src ? (
+          // The source is a short-lived signed Supabase URL, so it cannot be optimized at build time.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            className={styles.scanImage}
+            src={src}
+            alt="Pierwsza strona zeskanowanego dokumentu"
+          />
+        ) : (
+          <article
+            className={styles.paper}
+            aria-label="Podgląd przykładowego dokumentu"
+          >
+            <div className={styles.paperLogo}>SM</div>
+            <p className={styles.paperKicker}>STRAŻ MIEJSKA M.ST. WARSZAWY</p>
+            <div className={styles.paperRule} />
+            <p className={styles.paperDate}>Warszawa, 21 lipca 2026 r.</p>
+            <h4>
+              WEZWANIE DO WSKAZANIA
+              <br />
+              UŻYTKOWNIKA POJAZDU
+            </h4>
+            <p>
+              W związku z ujawnieniem naruszenia przepisów ruchu drogowego
+              prosimy o wskazanie osoby, której powierzono pojazd:
+            </p>
+            <div className={styles.paperHighlight}>
+              <span>Numer rejestracyjny</span>
+              <strong>WI 2847K</strong>
+            </div>
+            <div className={styles.paperHighlight}>
+              <span>Data i godzina zdarzenia</span>
+              <strong>18.07.2026, 14:32</strong>
+            </div>
+            <p className={styles.paperText}>
+              Odpowiedź należy przekazać w terminie 7 dni od dnia otrzymania
+              niniejszego pisma.
+            </p>
+            <div className={styles.paperSignature}>
+              Z upoważnienia
+              <br />
+              <strong>Starszy Inspektor</strong>
+            </div>
+          </article>
+        )}
       </div>
     </div>
   );

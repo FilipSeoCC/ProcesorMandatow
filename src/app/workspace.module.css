@@ -547,6 +547,16 @@
   display: grid;
   place-items: start center;
 }
+.scanImage {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  max-height: calc(100dvh - 190px);
+  margin: auto;
+  border-radius: 3px;
+  box-shadow: 0 8px 28px #17203325;
+  object-fit: contain;
+}
 .paper {
   width: min(100%, 410px);
   min-height: 530px;
