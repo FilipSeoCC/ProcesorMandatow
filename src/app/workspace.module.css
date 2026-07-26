@@ -392,6 +392,44 @@
 .caseList {
   overflow-y: auto;
 }
+.documentsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+  padding: 4px 0 24px;
+}
+.documentCard {
+  display: flex;
+  flex-direction: column;
+  text-align: left;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  cursor: pointer;
+}
+.documentCard:hover {
+  border-color: var(--blue);
+}
+.documentThumb {
+  height: 140px;
+  background: #eef2f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a3b8;
+}
+.documentThumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.documentMeta {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
 .caseItem {
   width: 100%;
   padding: 15px 16px;

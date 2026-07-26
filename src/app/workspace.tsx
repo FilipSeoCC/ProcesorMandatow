@@ -111,7 +111,9 @@ const statusClass: Record<CaseStatus, string> = {
 };
 
 export default function MandatyWorkspace() {
-  const [activeView, setActiveView] = useState<"cases" | "fleet">("cases");
+  const [activeView, setActiveView] = useState<
+    "cases" | "fleet" | "documents"
+  >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [caseItems, setCaseItems] = useState<CaseItem[]>(demoCases);
   const [selectedId, setSelectedId] = useState(demoCases[0].id);
@@ -359,10 +361,17 @@ export default function MandatyWorkspace() {
             <Inbox size={19} />
             Sprawy<span className={styles.navCount}>7</span>
           </button>
-          <a href="#" className={styles.navItem}>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView("documents");
+              setMobileMenu(false);
+            }}
+            className={`${styles.navItem} ${activeView === "documents" ? styles.navActive : ""}`}
+          >
             <FileText size={19} />
             Dokumenty
-          </a>
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -412,7 +421,9 @@ export default function MandatyWorkspace() {
             <h1>
               {activeView === "cases"
                 ? "Obsługa mandatów"
-                : "Zarządzanie flotą"}
+                : activeView === "documents"
+                  ? "Dokumenty"
+                  : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
@@ -424,21 +435,21 @@ export default function MandatyWorkspace() {
               <Bell size={20} />
               <span className={styles.notificationDot} />
             </button>
-            {activeView === "cases" ? (
-              <button
-                className={styles.primaryButton}
-                onClick={() => setScanOpen(true)}
-              >
-                <ScanLine size={18} />
-                Skanuj dokument
-              </button>
-            ) : (
+            {activeView === "fleet" ? (
               <button
                 className={styles.primaryButton}
                 onClick={() => setFleetImportOpen(true)}
               >
                 <Upload size={18} />
                 Importuj flotę
+              </button>
+            ) : (
+              <button
+                className={styles.primaryButton}
+                onClick={() => setScanOpen(true)}
+              >
+                <ScanLine size={18} />
+                Skanuj dokument
               </button>
             )}
           </div>
@@ -449,6 +460,51 @@ export default function MandatyWorkspace() {
             importOpen={fleetImportOpen}
             onCloseImport={() => setFleetImportOpen(false)}
           />
+        ) : activeView === "documents" ? (
+          <section className={styles.documentsGrid} aria-label="Wszystkie dokumenty">
+            {caseItems.length === 0 ? (
+              <div className={styles.emptyState}>
+                <FileText size={24} />
+                <strong>Brak dokumentów</strong>
+                <span>Zeskanowane dokumenty pojawią się tutaj.</span>
+              </div>
+            ) : (
+              caseItems.map((item) => (
+                <button
+                  key={item.id}
+                  className={styles.documentCard}
+                  onClick={() => {
+                    setSelectedId(item.id);
+                    setActiveView("cases");
+                  }}
+                >
+                  <span className={styles.documentThumb}>
+                    {item.previewUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={item.previewUrl} alt="" />
+                    ) : (
+                      <FileText size={26} />
+                    )}
+                  </span>
+                  <span className={styles.documentMeta}>
+                    <span className={styles.caseItemTop}>
+                      <strong className={styles.plate}>{item.plate}</strong>
+                      <span
+                        className={`${styles.status} ${statusClass[item.status]}`}
+                      >
+                        {item.status}
+                      </span>
+                    </span>
+                    <span className={styles.sender}>{item.sender}</span>
+                    <span className={styles.caseMeta}>
+                      <span>{item.id}</span>
+                      <span>{item.receivedAt}</span>
+                    </span>
+                  </span>
+                </button>
+              ))
+            )}
+          </section>
         ) : (
           <>
             <section className={styles.metrics} aria-label="Podsumowanie spraw">
@@ -717,21 +773,21 @@ export default function MandatyWorkspace() {
         )}
       </main>
 
-      {activeView === "cases" ? (
-        <button
-          className={styles.mobileScanButton}
-          onClick={() => setScanOpen(true)}
-        >
-          <Camera size={21} />
-          Skanuj dokument
-        </button>
-      ) : (
+      {activeView === "fleet" ? (
         <button
           className={styles.mobileScanButton}
           onClick={() => setFleetImportOpen(true)}
         >
           <Upload size={21} />
           Importuj flotę
+        </button>
+      ) : (
+        <button
+          className={styles.mobileScanButton}
+          onClick={() => setScanOpen(true)}
+        >
+          <Camera size={21} />
+          Skanuj dokument
         </button>
       )}
 
