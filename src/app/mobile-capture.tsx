@@ -1,12 +1,14 @@
 "use client";
 
-import { Camera, Check, CheckCircle2, FilePlus2, FileText, ScanLine, Send, ShieldCheck, Trash2, Upload, Wifi } from "lucide-react";
+import { Camera, Check, CheckCircle2, FilePlus2, FileText, Route, ScanLine, Send, ShieldCheck, Trash2, Upload, Wifi } from "lucide-react";
 import { ChangeEvent, useState } from "react";
+import DeliveryPlanner from "./delivery-planner";
 import styles from "./mobile-capture.module.css";
 
 type Transfer = { id: string; pages: number; time: string; status: "Przesłano" | "Analizowanie" };
 
 export default function MobileCapture() {
+  const [activeTab, setActiveTab] = useState<"scanner" | "routes">("scanner");
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -43,7 +45,7 @@ export default function MobileCapture() {
       <span className={styles.online}><Wifi size={14} />Online</span>
     </header>
 
-    <main>
+    {activeTab === "routes" ? <DeliveryPlanner /> : <main>
       <section className={styles.intro}><p>Nowe pismo</p><h1>Zeskanuj dokument</h1><span>Fotografuj kolejno wszystkie strony, a następnie prześlij je do panelu biurowego.</span></section>
 
       {sent && <div className={styles.sent} role="status"><CheckCircle2 size={22} /><span><strong>Dokument został przekazany</strong><small>Pojawi się automatycznie w kolejce na komputerze.</small></span></div>}
@@ -73,6 +75,10 @@ export default function MobileCapture() {
       <div className={styles.security}><ShieldCheck size={18} /><span><strong>Bezpieczny transfer</strong><small>Dokumenty są przesyłane szyfrowanym połączeniem.</small></span></div>
 
       <section className={styles.recent}><div className={styles.sectionTitle}><div><h2>Ostatnie transfery</h2></div><small>Na tym urządzeniu</small></div><div>{transfers.slice(0, 4).map((transfer) => <article key={transfer.id}><span className={styles.transferIcon}>{transfer.status === "Przesłano" ? <Check size={18} /> : <Camera size={18} />}</span><div><strong>{transfer.id}</strong><small>{transfer.pages} {transfer.pages === 1 ? "strona" : "strony"} · {transfer.time}</small></div><span className={transfer.status === "Przesłano" ? styles.done : styles.processing}>{transfer.status}</span></article>)}</div></section>
-    </main>
+    </main>}
+    <nav className={styles.bottomNav} aria-label="Nawigacja mobilna">
+      <button className={activeTab === "scanner" ? styles.activeNav : ""} onClick={() => setActiveTab("scanner")}><ScanLine size={20} /><span>Skaner</span></button>
+      <button className={activeTab === "routes" ? styles.activeNav : ""} onClick={() => setActiveTab("routes")}><Route size={20} /><span>Dostawy</span></button>
+    </nav>
   </div>;
 }
