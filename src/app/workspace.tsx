@@ -11,6 +11,8 @@ import {
   CircleHelp,
   Clock3,
   FileText,
+  Files,
+  ImagePlus,
   Inbox,
   LayoutDashboard,
   Menu,
@@ -18,6 +20,7 @@ import {
   ScanLine,
   Search,
   ShieldCheck,
+  Trash2,
   Upload,
   UserRound,
   UsersRound,
@@ -59,7 +62,8 @@ export default function MandatyWorkspace() {
   const [filter, setFilter] = useState<"Wszystkie" | CaseStatus>("Wszystkie");
   const [scanOpen, setScanOpen] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [saved, setSaved] = useState(false);
 
@@ -69,12 +73,31 @@ export default function MandatyWorkspace() {
     return matchesQuery && (filter === "Wszystkie" || item.status === filter);
   }), [filter, query]);
 
-  function handleFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    setUploadedFile(file.name);
+  function handleFiles(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = Array.from(event.target.files ?? []);
+    event.target.value = "";
+    if (selectedFiles.length === 0) return;
+
+    const invalidFile = selectedFiles.find((file) => file.size > 15 * 1024 * 1024);
+    if (invalidFile) {
+      setUploadError(`Plik „${invalidFile.name}” przekracza limit 15 MB.`);
+      return;
+    }
+
+    if (uploadedFiles.length + selectedFiles.length > 10) {
+      setUploadError("Jedna sprawa może zawierać maksymalnie 10 stron.");
+      return;
+    }
+
+    setUploadError(null);
+    setUploadedFiles((current) => [...current, ...selectedFiles]);
     setProcessing(true);
-    window.setTimeout(() => setProcessing(false), 1200);
+    window.setTimeout(() => setProcessing(false), 700);
+  }
+
+  function removeFile(index: number) {
+    setUploadedFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+    setUploadError(null);
   }
 
   function handleSave() {
@@ -193,13 +216,42 @@ export default function MandatyWorkspace() {
           <div className={styles.scanModal}>
             <div className={styles.modalHandle} />
             <div className={styles.modalHeader}><div><p className={styles.eyebrow}>Nowa sprawa</p><h2 id="scan-title">Dodaj dokument</h2></div><button className={styles.iconButton} onClick={() => setScanOpen(false)} aria-label="Zamknij"><X size={21} /></button></div>
-            <p className={styles.modalIntro}>Zrób wyraźne zdjęcie każdej strony. Dokument zostanie przesłany do bezpiecznej analizy.</p>
-            <label className={`${styles.uploadArea} ${uploadedFile ? styles.uploadReady : ""}`}>
-              <input type="file" accept="image/*,.pdf" capture="environment" onChange={handleFile} />
-              {processing ? <><span className={styles.spinner} /><strong>Przygotowujemy dokument…</strong><span>Sprawdzamy jakość obrazu</span></> : uploadedFile ? <><span className={styles.successIcon}><Check size={24} /></span><strong>{uploadedFile}</strong><span>Dokument gotowy do analizy</span></> : <><span className={styles.cameraIcon}><Camera size={28} /></span><strong>Zrób zdjęcie dokumentu</strong><span>lub wybierz plik PDF/JPG z urządzenia</span></>}
-            </label>
+            <p className={styles.modalIntro}>Dodaj wszystkie strony po kolei. Na iPhonie po każdym zdjęciu wrócisz tutaj, aby zrobić następne.</p>
+
+            <div className={styles.sourceGrid}>
+              <label className={styles.cameraAction}>
+                <input type="file" accept="image/*,.heic,.heif" capture="environment" onChange={handleFiles} />
+                <span className={styles.cameraIcon}><Camera size={28} /></span>
+                <span><strong>Zrób zdjęcie</strong><small>Otworzy tylny aparat</small></span>
+              </label>
+              <label className={styles.fileAction}>
+                <input type="file" accept="image/*,.heic,.heif,.pdf,application/pdf" multiple onChange={handleFiles} />
+                <span className={styles.fileIcon}><ImagePlus size={24} /></span>
+                <span><strong>Wybierz pliki</strong><small>Zdjęcia lub PDF</small></span>
+              </label>
+            </div>
+
+            {uploadError && <p className={styles.uploadError} role="alert">{uploadError}</p>}
+
+            {processing && <div className={styles.processingRow}><span className={styles.spinner} /><span><strong>Dodajemy stronę…</strong><small>Nie zamykaj tego okna</small></span></div>}
+
+            {uploadedFiles.length > 0 && (
+              <section className={styles.fileSection} aria-labelledby="added-pages-title">
+                <div className={styles.fileSectionHeader}><div><h3 id="added-pages-title">Dodane strony</h3><span>{uploadedFiles.length}/10</span></div><small>Sprawdź kolejność przed wysłaniem</small></div>
+                <ol className={styles.fileList}>
+                  {uploadedFiles.map((file, index) => (
+                    <li key={`${file.name}-${file.lastModified}-${index}`}>
+                      <span className={styles.pageNumber}>{index + 1}</span>
+                      <span className={styles.fileType}>{file.type === "application/pdf" ? <Files size={19} /> : <ImagePlus size={19} />}</span>
+                      <span className={styles.fileName}><strong>{file.name || `Zdjęcie ${index + 1}`}</strong><small>{(file.size / 1024 / 1024).toFixed(1)} MB · strona {index + 1}</small></span>
+                      <button type="button" onClick={() => removeFile(index)} aria-label={`Usuń stronę ${index + 1}`}><Trash2 size={18} /></button>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
             <div className={styles.scanTips}><ShieldCheck size={18} /><span><strong>Bezpieczne przesyłanie</strong><small>Zdjęcie nie zostanie zapisane w galerii przez aplikację.</small></span></div>
-            <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={() => setScanOpen(false)}>Anuluj</button><button className={styles.primaryButton} disabled={!uploadedFile || processing} onClick={() => setScanOpen(false)}><Upload size={18} />Wyślij do analizy</button></div>
+            <div className={styles.modalActions}><button className={styles.secondaryButton} onClick={() => setScanOpen(false)}>Anuluj</button><button className={styles.primaryButton} disabled={uploadedFiles.length === 0 || processing} onClick={() => setScanOpen(false)}><Upload size={18} />Wyślij {uploadedFiles.length > 0 ? `(${uploadedFiles.length})` : ""} do analizy</button></div>
           </div>
         </div>
       )}
