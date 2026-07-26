@@ -7,12 +7,22 @@ import styles from "./mobile-capture.module.css";
 
 type Transfer = { id: string; pages: number; time: string; status: "Przesłano" | "Analizowanie" };
 
+function storedAccessToken() {
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+    try { const session = JSON.parse(localStorage.getItem(key) || "null"); if (session?.access_token) return String(session.access_token); } catch {}
+  }
+  return null;
+}
+
 export default function MobileCapture() {
   const [activeTab, setActiveTab] = useState<"scanner" | "routes">("scanner");
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
+  const [sentMode, setSentMode] = useState<"demo" | "supabase">("demo");
   const [transfers, setTransfers] = useState<Transfer[]>([
     { id: "DOC-1048", pages: 2, time: "Dzisiaj, 09:14", status: "Przesłano" },
     { id: "DOC-1047", pages: 1, time: "Dzisiaj, 08:46", status: "Analizowanie" },
@@ -29,26 +39,36 @@ export default function MobileCapture() {
     setError(null); setSent(false); setFiles((current) => [...current, ...selected]);
   }
 
-  function sendToDatabase() {
+  async function sendToDatabase() {
     if (!files.length || sending) return;
     setSending(true);
-    window.setTimeout(() => {
+    setError(null);
+    try {
+      const form = new FormData();
+      files.forEach((file) => form.append("files", file));
+      const token = storedAccessToken();
+      const response = await fetch("/api/documents/upload", { method: "POST", headers: token ? { Authorization: `Bearer ${token}` } : undefined, body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Nie udało się przesłać dokumentu.");
       const now = new Date();
-      setTransfers((current) => [{ id: `DOC-${1049 + current.length}`, pages: files.length, time: `Dzisiaj, ${now.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })}`, status: "Analizowanie" }, ...current]);
-      setFiles([]); setSending(false); setSent(true);
-    }, 900);
+      setTransfers((current) => [{ id: String(result.documentId).slice(0, 13), pages: files.length, time: `Dzisiaj, ${now.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })}`, status: "Analizowanie" }, ...current]);
+      setFiles([]); setSending(false); setSentMode(result.mode === "supabase" ? "supabase" : "demo"); setSent(true);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Nie udało się przesłać dokumentu.");
+      setSending(false);
+    }
   }
 
   return <div className={styles.app}>
     <header className={styles.header}>
-      <div className={styles.brand}><span><FileText size={19} /></span><div><strong>Flota<span>Flow</span></strong><small>Skaner dokumentów</small></div></div>
+      <div className={styles.brand}><span><FileText size={19} /></span><div><strong>Flota<span>Flow</span></strong><small>{activeTab === "scanner" ? "Skaner dokumentów" : "Planer dostaw"}</small></div></div>
       <span className={styles.online}><Wifi size={14} />Online</span>
     </header>
 
     {activeTab === "routes" ? <DeliveryPlanner /> : <main>
       <section className={styles.intro}><p>Nowe pismo</p><h1>Zeskanuj dokument</h1><span>Fotografuj kolejno wszystkie strony, a następnie prześlij je do panelu biurowego.</span></section>
 
-      {sent && <div className={styles.sent} role="status"><CheckCircle2 size={22} /><span><strong>Dokument został przekazany</strong><small>Pojawi się automatycznie w kolejce na komputerze.</small></span></div>}
+      {sent && <div className={styles.sent} role="status"><CheckCircle2 size={22} /><span><strong>{sentMode === "supabase" ? "Dokument został przekazany" : "Tryb demonstracyjny"}</strong><small>{sentMode === "supabase" ? "Pojawi się automatycznie w kolejce na komputerze." : "Pliki nie zostały zapisane — podłącz Supabase, aby uruchomić transfer."}</small></span></div>}
 
       <section className={styles.scannerCard}>
         <label className={styles.scanButton}>

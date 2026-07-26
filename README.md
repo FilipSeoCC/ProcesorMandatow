@@ -48,7 +48,7 @@ Endpoint `POST /api/routes/optimize` działa w dwóch trybach:
 - bez konfiguracji — lokalny algorytm demonstracyjny, dzięki któremu PoC działa od razu,
 - z `GOOGLE_MAPS_SERVER_API_KEY` i `GOOGLE_CLOUD_PROJECT_ID` — Google Route Optimization API.
 
-Skopiuj `.env.example` do `.env.local` i wpisz nowy, obrócony klucz. Sekret Google nie może mieć prefiksu `NEXT_PUBLIC_` ani trafić do repozytorium. Dla produkcji należy dodatkowo weryfikować sesję i rolę `dispatcher` w Route Handlerze.
+Skopiuj `.env.example` do `.env.local` i wpisz nowy, obrócony klucz. Sekret Google nie może mieć prefiksu `NEXT_PUBLIC_` ani trafić do repozytorium. Gdy Google jest skonfigurowane, Route Handler wymaga poprawnej sesji Supabase i roli `admin` albo `dispatcher`.
 
 ## Model danych Supabase
 
@@ -59,5 +59,8 @@ Plik `supabase/schema.sql` zawiera fundament bazy dla:
 - historii przypisania pojazdu do klienta bez nakładających się okresów,
 - zleceń dostawy, planów tras i przystanków,
 - audytu oraz polityk Row Level Security rozdzielających odczyt i zapis według roli.
+- prywatnego bucketa `mandate-documents` i metadanych stron dokumentu.
 
-Schemat jest przygotowaniem do podłączenia trwałego backendu; obecny interfejs nadal korzysta z danych demonstracyjnych.
+Po uruchomieniu schematu pierwszy zalogowany użytkownik tworzy firmę przez funkcję RPC `bootstrap_organization`. Skaner zapisuje pliki w Supabase tylko po zweryfikowaniu roli `admin`, `office` lub `scanner`; bez konfiguracji wyraźnie pokazuje tryb demonstracyjny.
+
+Adresy dostaw są przekazywane do Google w celu wyznaczenia trasy. Przed wdrożeniem produkcyjnym należy ująć ten proces w dokumentacji RODO i właściwych umowach powierzenia.

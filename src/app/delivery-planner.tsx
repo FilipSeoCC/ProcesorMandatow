@@ -14,30 +14,42 @@ const initialDeliveries: Delivery[] = [
   { id: "DST-107", vehicle: "Renault Master · WPR 77A9", customer: "M-Projekt", address: "Sienkiewicza 31, Pruszków", latitude: 52.1692, longitude: 20.8026, serviceMinutes: 30, priority: 1 },
 ];
 
+function storedAccessToken() {
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+    try { const session = JSON.parse(localStorage.getItem(key) || "null"); if (session?.access_token) return String(session.access_token); } catch {}
+  }
+  return null;
+}
+
 export default function DeliveryPlanner() {
   const [deliveries] = useState(initialDeliveries);
   const [selected, setSelected] = useState<string[]>(initialDeliveries.map((item) => item.id));
   const [result, setResult] = useState<Optimization | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [routeDirty, setRouteDirty] = useState(false);
   const ordered = useMemo(() => result ? result.orderedStopIds.map((id) => deliveries.find((item) => item.id === id)).filter((item): item is Delivery => Boolean(item)) : deliveries.filter((item) => selected.includes(item.id)), [deliveries, result, selected]);
 
-  function toggle(id: string) { setResult(null); setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }
+  function toggle(id: string) { setResult(null); setRouteDirty(false); setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }
   function move(index: number, direction: -1 | 1) {
     const next = [...ordered]; const target = index + direction;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
-    setResult((current) => current ? { ...current, mode: "demo", orderedStopIds: next.map((item) => item.id), warning: "Kolejność zmieniona ręcznie — przelicz trasę przed startem." } : current);
+    setResult((current) => current ? { ...current, orderedStopIds: next.map((item) => item.id), warning: "Kolejność zmieniona ręcznie — przelicz trasę przed startem." } : current);
+    setRouteDirty(true);
   }
   async function optimize() {
     const stops = deliveries.filter((item) => selected.includes(item.id));
     if (stops.length < 2) { setError("Wybierz przynajmniej dwie dostawy."); return; }
     setLoading(true); setError(null);
     try {
-      const response = await fetch("/api/routes/optimize", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ depot, returnToDepot: true, stops }) });
+      const token = storedAccessToken();
+      const response = await fetch("/api/routes/optimize", { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ depot, returnToDepot: true, stops }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Nie udało się ułożyć trasy.");
-      setResult(data);
+      setResult(data); setRouteDirty(false);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Nie udało się ułożyć trasy."); } finally { setLoading(false); }
   }
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(depot.address)}&destination=${encodeURIComponent(depot.address)}&waypoints=${ordered.map((item) => encodeURIComponent(item.address)).join("%7C")}&travelmode=driving`;
@@ -50,10 +62,12 @@ export default function DeliveryPlanner() {
       {error && <p className={styles.error}><AlertTriangle size={17} />{error}</p>}
       <button className={styles.optimize} onClick={optimize} disabled={loading || selected.length < 2}>{loading ? <LoaderCircle className={styles.spin} size={21} /> : <Sparkles size={21} />}{loading ? "Układam najlepszą trasę…" : "Zoptymalizuj trasę"}</button>
     </> : <>
-      <section className={styles.summary}><div><span><Route size={18} />Trasa gotowa</span><strong>{result.distanceKm} km</strong><small>około {Math.floor(result.durationMinutes / 60)} h {result.durationMinutes % 60} min · {ordered.length} dostawy</small></div><em>{result.mode === "google" ? "Google Optimization" : "Tryb demonstracyjny"}</em></section>
+      <section className={styles.summary}><div><span><Route size={18} />{routeDirty ? "Trasa zmieniona" : "Trasa gotowa"}</span><strong>{routeDirty ? "—" : `${result.distanceKm} km`}</strong><small>{routeDirty ? "Przelicz czas i dystans przed startem" : `około ${Math.floor(result.durationMinutes / 60)} h ${result.durationMinutes % 60} min · ${ordered.length} dostawy`}</small></div><em>{result.mode === "google" ? "Google Optimization" : "Tryb demonstracyjny"}</em></section>
       {result.warning && <p className={styles.warning}><AlertTriangle size={16} />{result.warning}</p>}
+      {result.skippedStopIds.length > 0 && <p className={styles.error}><AlertTriangle size={17} />Nie udało się zaplanować: {result.skippedStopIds.map((id) => deliveries.find((item) => item.id === id)?.customer ?? id).join(", ")}. Zmień dane przed rozpoczęciem.</p>}
+      {ordered.length > 9 && <p className={styles.warning}><AlertTriangle size={16} />Google Maps na telefonie może nie otworzyć więcej niż 9 punktów. Podziel plan na dwie trasy.</p>}
       <section className={styles.routeList}><div className={styles.routePoint}><span>START</span><div><strong>{depot.address}</strong><small>Plac floty</small></div></div>{ordered.map((delivery, index) => <article key={delivery.id}><span className={styles.stopNo}>{index + 1}</span><div><strong>{delivery.customer}</strong><b>{delivery.vehicle}</b><small>{delivery.address} · {delivery.serviceMinutes} min</small></div><span className={styles.moveButtons}><button onClick={() => move(index, -1)} disabled={index === 0} aria-label="Przenieś wyżej"><ArrowUp size={17} /></button><button onClick={() => move(index, 1)} disabled={index === ordered.length - 1} aria-label="Przenieś niżej"><ArrowDown size={17} /></button></span></article>)}<div className={styles.routePoint}><span>KONIEC</span><div><strong>{depot.address}</strong><small>Powrót na plac</small></div></div></section>
-      <div className={styles.actions}><button onClick={() => setResult(null)}>Zmień dostawy</button><a href={mapsUrl} target="_blank" rel="noopener noreferrer"><Navigation size={19} />Rozpocznij<ExternalLink size={15} /></a></div>
+      <div className={styles.actions}><button onClick={() => setResult(null)}>Zmień dostawy</button>{routeDirty ? <button className={styles.recalculate} onClick={optimize}><Sparkles size={18} />Przelicz trasę</button> : result.skippedStopIds.length > 0 || ordered.length > 9 ? <button disabled>Popraw plan</button> : <a href={mapsUrl} target="_blank" rel="noopener noreferrer"><Navigation size={19} />Rozpocznij<ExternalLink size={15} /></a>}</div>
     </>}
   </div>;
 }

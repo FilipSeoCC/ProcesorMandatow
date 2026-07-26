@@ -17,19 +17,21 @@ create table if not exists public.organization_members (
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   name text not null, tax_id text not null default '', email text not null default '', phone text not null default '', address text not null default '',
-  latitude double precision, longitude double precision, created_at timestamptz not null default now()
+  latitude double precision, longitude double precision, created_at timestamptz not null default now(), unique(organization_id,id)
 );
 create table if not exists public.vehicles (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   brand text not null, model text not null, registration_number text not null, vin text not null default '', status text not null default 'active',
-  created_at timestamptz not null default now(), unique(organization_id,registration_number)
+  created_at timestamptz not null default now(), unique(organization_id,registration_number), unique(organization_id,id)
 );
 create table if not exists public.vehicle_assignments (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
-  vehicle_id uuid not null references public.vehicles(id) on delete restrict, customer_id uuid not null references public.customers(id) on delete restrict,
+  vehicle_id uuid not null, customer_id uuid not null,
   agreement_number text not null default '', valid_from timestamptz not null, valid_to timestamptz, source text not null default 'manual',
   created_by uuid references auth.users(id) on delete set null, created_at timestamptz not null default now(),
-  check(valid_to is null or valid_to > valid_from)
+  check(valid_to is null or valid_to > valid_from),
+  foreign key(organization_id,vehicle_id) references public.vehicles(organization_id,id) on delete restrict,
+  foreign key(organization_id,customer_id) references public.customers(organization_id,id) on delete restrict
 );
 create index if not exists assignments_vehicle_period on public.vehicle_assignments(vehicle_id,valid_from,valid_to);
 alter table public.vehicle_assignments drop constraint if exists vehicle_assignment_no_overlap;
@@ -38,23 +40,39 @@ alter table public.vehicle_assignments add constraint vehicle_assignment_no_over
 
 create table if not exists public.delivery_orders (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
-  vehicle_id uuid not null references public.vehicles(id) on delete restrict, customer_id uuid not null references public.customers(id) on delete restrict,
+  vehicle_id uuid not null, customer_id uuid not null,
   address text not null, latitude double precision not null check(latitude between -90 and 90), longitude double precision not null check(longitude between -180 and 180),
   window_start timestamptz, window_end timestamptz, service_minutes integer not null default 20 check(service_minutes between 0 and 240),
-  priority smallint not null default 1 check(priority between 1 and 5), status text not null default 'ready', created_at timestamptz not null default now()
+  priority smallint not null default 1 check(priority between 1 and 5), status text not null default 'ready', created_at timestamptz not null default now(),
+  unique(organization_id,id),
+  foreign key(organization_id,vehicle_id) references public.vehicles(organization_id,id) on delete restrict,
+  foreign key(organization_id,customer_id) references public.customers(organization_id,id) on delete restrict
 );
 create table if not exists public.route_plans (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   planned_for date not null, dispatcher_id uuid references auth.users(id) on delete set null, start_address text not null,
   start_latitude double precision not null, start_longitude double precision not null, status text not null default 'draft',
   optimization_source text not null default 'manual', distance_meters integer, duration_seconds integer,
-  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now(), unique(organization_id,id)
 );
 create table if not exists public.route_stops (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
-  route_plan_id uuid not null references public.route_plans(id) on delete cascade, delivery_order_id uuid not null references public.delivery_orders(id) on delete restrict,
+  route_plan_id uuid not null, delivery_order_id uuid not null,
   position integer not null check(position>0), planned_arrival timestamptz, status text not null default 'planned', completed_at timestamptz,
-  notes text not null default '', unique(route_plan_id,position), unique(route_plan_id,delivery_order_id)
+  notes text not null default '', unique(route_plan_id,position), unique(route_plan_id,delivery_order_id),
+  foreign key(organization_id,route_plan_id) references public.route_plans(organization_id,id) on delete cascade,
+  foreign key(organization_id,delivery_order_id) references public.delivery_orders(organization_id,id) on delete restrict
+);
+create table if not exists public.mandate_documents (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  uploaded_by uuid references auth.users(id) on delete set null, page_count integer not null check(page_count between 1 and 10),
+  status text not null default 'uploaded', created_at timestamptz not null default now(), unique(organization_id,id)
+);
+create table if not exists public.mandate_document_pages (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  document_id uuid not null, page_number integer not null check(page_number between 1 and 10), storage_path text not null unique,
+  original_name text not null, mime_type text not null, size_bytes bigint not null check(size_bytes>0), created_at timestamptz not null default now(),
+  unique(document_id,page_number), foreign key(organization_id,document_id) references public.mandate_documents(organization_id,id) on delete cascade
 );
 create table if not exists public.audit_events (
   id bigint generated always as identity primary key, organization_id uuid not null references public.organizations(id) on delete cascade,
@@ -66,11 +84,35 @@ create or replace function public.is_org_member(org_id uuid) returns boolean lan
  select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid()) $$;
 create or replace function public.has_org_role(org_id uuid, allowed public.app_role[]) returns boolean language sql stable security definer set search_path=public as $$
  select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid() and role=any(allowed)) $$;
+create or replace function public.bootstrap_organization(company_name text) returns uuid language plpgsql security definer set search_path=public as $$
+declare created_id uuid;
+begin
+  if auth.uid() is null then raise exception 'Not authenticated'; end if;
+  if exists(select 1 from public.organization_members where user_id=auth.uid()) then raise exception 'User already belongs to an organization'; end if;
+  insert into public.organizations(name,owner_id) values(coalesce(nullif(trim(company_name),''),'Moja firma'),auth.uid()) returning id into created_id;
+  insert into public.organization_members(organization_id,user_id,role) values(created_id,auth.uid(),'admin');
+  return created_id;
+end $$;
+revoke all on function public.bootstrap_organization(text) from public;
+grant execute on function public.bootstrap_organization(text) to authenticated;
 
 alter table public.organizations enable row level security; alter table public.organization_members enable row level security;
 alter table public.customers enable row level security; alter table public.vehicles enable row level security;
 alter table public.vehicle_assignments enable row level security; alter table public.delivery_orders enable row level security;
 alter table public.route_plans enable row level security; alter table public.route_stops enable row level security; alter table public.audit_events enable row level security;
+alter table public.mandate_documents enable row level security; alter table public.mandate_document_pages enable row level security;
+
+drop policy if exists organizations_read on public.organizations; drop policy if exists organizations_admin on public.organizations;
+drop policy if exists members_read on public.organization_members; drop policy if exists members_admin on public.organization_members;
+drop policy if exists customers_read on public.customers; drop policy if exists customers_write on public.customers;
+drop policy if exists vehicles_read on public.vehicles; drop policy if exists vehicles_write on public.vehicles;
+drop policy if exists assignments_read on public.vehicle_assignments; drop policy if exists assignments_write on public.vehicle_assignments;
+drop policy if exists deliveries_read on public.delivery_orders; drop policy if exists deliveries_write on public.delivery_orders;
+drop policy if exists plans_read on public.route_plans; drop policy if exists plans_write on public.route_plans;
+drop policy if exists stops_read on public.route_stops; drop policy if exists stops_write on public.route_stops;
+drop policy if exists documents_read on public.mandate_documents; drop policy if exists documents_write on public.mandate_documents;
+drop policy if exists document_pages_read on public.mandate_document_pages; drop policy if exists document_pages_write on public.mandate_document_pages;
+drop policy if exists audit_read on public.audit_events; drop policy if exists audit_insert on public.audit_events;
 
 create policy organizations_read on public.organizations for select using(public.is_org_member(id));
 create policy organizations_admin on public.organizations for update using(public.has_org_role(id,array['admin']::public.app_role[]));
@@ -88,5 +130,13 @@ create policy plans_read on public.route_plans for select using(public.is_org_me
 create policy plans_write on public.route_plans for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
 create policy stops_read on public.route_stops for select using(public.is_org_member(organization_id));
 create policy stops_write on public.route_stops for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
+create policy documents_read on public.mandate_documents for select using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
+create policy documents_write on public.mandate_documents for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
+create policy document_pages_read on public.mandate_document_pages for select using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
+create policy document_pages_write on public.mandate_document_pages for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
 create policy audit_read on public.audit_events for select using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());
+
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
+values('mandate-documents','mandate-documents',false,15728640,array['application/pdf','image/jpeg','image/png','image/tiff','image/heic','image/heif'])
+on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;

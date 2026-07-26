@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { verifyMember } from "@/lib/supabase-auth";
 
 export const runtime = "nodejs";
 
@@ -51,6 +52,8 @@ export async function POST(request: Request) {
   const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
   if (!apiKey || !projectId) return NextResponse.json(demo(body));
+  const member = await verifyMember(request, ["admin", "dispatcher"]);
+  if (!member) return NextResponse.json({ error: "Zaloguj się jako administrator lub dyspozytor, aby użyć Google." }, { status: 401 });
 
   const now = new Date();
   const googleRequest = { model: { globalStartTime: now.toISOString(), globalEndTime: new Date(now.getTime() + 16 * 60 * 60 * 1000).toISOString(), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s` }] })), vehicles: [{ label: "Wadim", startLocation: body.depot, ...(body.returnToDepot === false ? {} : { endLocation: body.depot }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
@@ -64,6 +67,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ mode: "google", orderedStopIds, distanceKm: Math.round((route?.metrics?.travelDistanceMeters ?? 0) / 1000), durationMinutes: Math.round(durationSeconds / 60), skippedStopIds: (result.skippedShipments ?? []).flatMap((item) => item.index === undefined ? [] : [body.stops[item.index]?.id]).filter(Boolean) });
   } catch (error) {
     console.error("Route optimization failed", error);
-    return NextResponse.json({ ...demo(body), warning: "Google jest chwilowo niedostępny — użyto planu lokalnego." });
+    return NextResponse.json({ error: "Google Route Optimization jest chwilowo niedostępny. Spróbuj ponownie." }, { status: 502 });
   }
 }
