@@ -1,5 +1,5 @@
 import "server-only";
-import { GoogleAuth } from "google-auth-library";
+import { ExternalAccountClient } from "google-auth-library";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 type OcrFile = { name: string; type: string; bytes: ArrayBuffer };
@@ -13,24 +13,34 @@ type ExtractedFields = {
 };
 
 function documentAiConfig() {
-  const rawCredentials = process.env.GOOGLE_DOCUMENT_AI_SERVICE_ACCOUNT_JSON;
+  const audience = process.env.GOOGLE_WIF_AUDIENCE;
   const processorId = process.env.GOOGLE_DOCUMENT_AI_PROCESSOR_ID;
   const location = process.env.GOOGLE_DOCUMENT_AI_LOCATION || "eu";
-  if (!rawCredentials || !processorId) return null;
-  try {
-    const credentials = JSON.parse(rawCredentials) as {
-      project_id?: string;
-      client_email?: string;
-      private_key?: string;
-    };
-    const projectId =
-      process.env.GOOGLE_CLOUD_PROJECT_ID || credentials.project_id;
-    if (!projectId || !credentials.client_email || !credentials.private_key)
-      return null;
-    return { credentials, processorId, location, projectId };
-  } catch {
-    return null;
-  }
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+  if (!audience || !processorId || !projectId) return null;
+  return { audience, processorId, location, projectId };
+}
+
+// Vercel OIDC federation: exchanges VERCEL_OIDC_TOKEN for a short-lived GCP
+// access token via Workload Identity Federation. No service account key
+// involved (blocked by org policy iam.disableServiceAccountKeyCreation).
+function workloadIdentityClient(audience: string) {
+  const client = ExternalAccountClient.fromJSON({
+    type: "external_account",
+    audience,
+    subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+    token_url: "https://sts.googleapis.com/v1/token",
+    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    subject_token_supplier: {
+      getSubjectToken: async () => {
+        const token = process.env.VERCEL_OIDC_TOKEN;
+        if (!token) throw new Error("VERCEL_OIDC_TOKEN missing");
+        return token;
+      },
+    },
+  });
+  if (!client) throw new Error("OCR_WIF_CONFIG_INVALID");
+  return client;
 }
 
 function isoDate(value: string) {
@@ -109,11 +119,8 @@ export function extractMandateFields(rawText: string): ExtractedFields {
 async function readWithDocumentAi(file: OcrFile) {
   const config = documentAiConfig();
   if (!config) throw new Error("OCR_NOT_CONFIGURED");
-  const auth = new GoogleAuth({
-    credentials: config.credentials,
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  });
-  const token = await auth.getAccessToken();
+  const client = workloadIdentityClient(config.audience);
+  const { token } = await client.getAccessToken();
   if (!token) throw new Error("OCR_AUTH_FAILED");
   const endpoint = `https://${config.location}-documentai.googleapis.com/v1/projects/${config.projectId}/locations/${config.location}/processors/${config.processorId}:process`;
   const response = await fetch(endpoint, {
