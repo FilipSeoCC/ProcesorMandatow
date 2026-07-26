@@ -94,10 +94,17 @@ create or replace function public.is_org_member(org_id uuid) returns boolean lan
 create or replace function public.has_org_role(org_id uuid, allowed public.app_role[]) returns boolean language sql stable security definer set search_path=public as $$
  select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid() and role=any(allowed)) $$;
 create or replace function public.bootstrap_organization(company_name text) returns uuid language plpgsql security definer set search_path=public as $$
-declare created_id uuid;
+declare created_id uuid; existing_id uuid;
 begin
   if auth.uid() is null then raise exception 'Not authenticated'; end if;
   if exists(select 1 from public.organization_members where user_id=auth.uid()) then raise exception 'User already belongs to an organization'; end if;
+  -- Single-tenant deployment: once an organization exists, every new signup
+  -- joins it (view-only) instead of bootstrapping its own isolated org.
+  select id into existing_id from public.organizations order by created_at asc limit 1;
+  if existing_id is not null then
+    insert into public.organization_members(organization_id,user_id,role) values(existing_id,auth.uid(),'viewer');
+    return existing_id;
+  end if;
   insert into public.organizations(name,owner_id) values(coalesce(nullif(trim(company_name),''),'Moja firma'),auth.uid()) returning id into created_id;
   insert into public.organization_members(organization_id,user_id,role) values(created_id,auth.uid(),'admin');
   return created_id;

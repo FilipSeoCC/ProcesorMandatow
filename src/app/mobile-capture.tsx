@@ -26,6 +26,22 @@ type Transfer = {
   status: "Przesłano" | "Analizowanie";
 };
 
+type Page = { id: string; file: File; name: string };
+
+function extensionOf(fileName: string) {
+  const match = fileName.match(/\.[^.]+$/);
+  return match ? match[0] : "";
+}
+
+function renamedFile(file: File, displayName: string) {
+  const trimmed = displayName.trim();
+  if (!trimmed) return file;
+  return new File([file], `${trimmed}${extensionOf(file.name)}`, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
+
 function storedAccessToken() {
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
@@ -41,7 +57,7 @@ function storedAccessToken() {
 export default function MobileCapture() {
   const [activeTab, setActiveTab] = useState<"scanner" | "routes">("scanner");
   const [online, setOnline] = useState(true);
-  const [files, setFiles] = useState<File[]>([]);
+  const [pages, setPages] = useState<Page[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -101,23 +117,32 @@ export default function MobileCapture() {
       );
       return;
     }
-    if (files.length + selected.length > 10) {
+    if (pages.length + selected.length > 10) {
       setError("Jedno pismo może zawierać maksymalnie 10 stron.");
       return;
     }
     setError(null);
     setSent(false);
     setOcrQueued(false);
-    setFiles((current) => [...current, ...selected]);
+    setPages((current) => [
+      ...current,
+      ...selected.map((file, offset) => ({
+        id: `${Date.now()}-${current.length + offset}`,
+        file,
+        name: `Dokument ${current.length + offset + 1}`,
+      })),
+    ]);
   }
 
   async function sendToDatabase() {
-    if (!files.length || sending) return;
+    if (!pages.length || sending) return;
     setSending(true);
     setError(null);
     try {
       const form = new FormData();
-      files.forEach((file) => form.append("files", file));
+      pages.forEach((page) =>
+        form.append("files", renamedFile(page.file, page.name)),
+      );
       const token = storedAccessToken();
       const response = await fetch("/api/documents/upload", {
         method: "POST",
@@ -131,13 +156,13 @@ export default function MobileCapture() {
       setTransfers((current) => [
         {
           id: String(result.documentId).slice(0, 13),
-          pages: files.length,
+          pages: pages.length,
           time: `Dzisiaj, ${now.toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" })}`,
           status: "Analizowanie",
         },
         ...current,
       ]);
-      setFiles([]);
+      setPages([]);
       setSending(false);
       setSentMode(result.mode === "supabase" ? "supabase" : "demo");
       setOcrQueued(result.ocrStatus === "queued");
@@ -219,7 +244,7 @@ export default function MobileCapture() {
                 <ScanLine size={38} />
               </span>
               <strong>
-                {files.length ? "Skanuj następną stronę" : "Uruchom skaner"}
+                {pages.length ? "Skanuj następną stronę" : "Uruchom skaner"}
               </strong>
               <small>Otworzy tylny aparat telefonu</small>
             </label>
@@ -244,30 +269,46 @@ export default function MobileCapture() {
             </p>
           )}
 
-          {files.length > 0 && (
+          {pages.length > 0 && (
             <section className={styles.pages}>
               <div className={styles.sectionTitle}>
                 <div>
                   <h2>Strony dokumentu</h2>
-                  <span>{files.length}/10</span>
+                  <span>{pages.length}/10</span>
                 </div>
-                <small>Sprawdź kompletność pisma</small>
+                <small>Sprawdź kompletność pisma, kliknij nazwę by zmienić</small>
               </div>
               <ol>
-                {files.map((file, index) => (
-                  <li key={`${file.name}-${file.lastModified}-${index}`}>
+                {pages.map((page, index) => (
+                  <li key={page.id}>
                     <span className={styles.pageNo}>{index + 1}</span>
                     <span className={styles.fileIcon}>
                       <FilePlus2 size={20} />
                     </span>
                     <span className={styles.fileInfo}>
-                      <strong>{file.name || `Zdjęcie ${index + 1}`}</strong>
-                      <small>{(file.size / 1024 / 1024).toFixed(1)} MB</small>
+                      <input
+                        className={styles.nameInput}
+                        value={page.name}
+                        aria-label={`Nazwa strony ${index + 1}`}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setPages((current) =>
+                            current.map((item) =>
+                              item.id === page.id
+                                ? { ...item, name: value }
+                                : item,
+                            ),
+                          );
+                        }}
+                      />
+                      <small>
+                        {(page.file.size / 1024 / 1024).toFixed(1)} MB
+                      </small>
                     </span>
                     <button
                       onClick={() =>
-                        setFiles((current) =>
-                          current.filter((_, itemIndex) => itemIndex !== index),
+                        setPages((current) =>
+                          current.filter((item) => item.id !== page.id),
                         )
                       }
                       aria-label={`Usuń stronę ${index + 1}`}
@@ -289,7 +330,7 @@ export default function MobileCapture() {
                 )}
                 {sending
                   ? "Przesyłanie…"
-                  : `Przekaż ${files.length} ${files.length === 1 ? "stronę" : "strony"} do bazy`}
+                  : `Przekaż ${pages.length} ${pages.length === 1 ? "stronę" : "strony"} do bazy`}
               </button>
             </section>
           )}

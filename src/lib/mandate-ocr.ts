@@ -1,5 +1,6 @@
 import "server-only";
 import { ExternalAccountClient } from "google-auth-library";
+import { getVercelOidcToken } from "@vercel/oidc";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 type OcrFile = { name: string; type: string; bytes: ArrayBuffer };
@@ -32,8 +33,11 @@ function workloadIdentityClient(audience: string) {
     token_url: "https://sts.googleapis.com/v1/token",
     scopes: ["https://www.googleapis.com/auth/cloud-platform"],
     subject_token_supplier: {
+      // process.env.VERCEL_OIDC_TOKEN only exists at build time; inside a
+      // running Vercel Function the token instead arrives on the request as
+      // the x-vercel-oidc-token header, which this helper reads for us.
       getSubjectToken: async () => {
-        const token = process.env.VERCEL_OIDC_TOKEN;
+        const token = await getVercelOidcToken();
         if (!token) throw new Error("VERCEL_OIDC_TOKEN missing");
         return token;
       },

@@ -103,7 +103,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           <p>
             {mode === "sign-in"
               ? "Uzyskaj dostęp do dokumentów, floty i tras dostaw."
-              : "Pierwsze konto utworzy organizację i otrzyma rolę administratora."}
+              : "Pierwsze konto zakłada organizację i zostaje administratorem. Kolejne konta dołączają automatycznie z dostępem do odczytu."}
           </p>
         </div>
         <form onSubmit={submit}>

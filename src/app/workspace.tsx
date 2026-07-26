@@ -35,6 +35,7 @@ type CaseStatus = "Do weryfikacji" | "Dopasowano" | "Nowa";
 
 type CaseItem = {
   id: string;
+  documentId?: string;
   plate: string;
   sender: string;
   eventAt: string;
@@ -46,6 +47,14 @@ type CaseItem = {
   previewUrl?: string | null;
   ocrStatus?: string;
 };
+
+// Statuses the background OCR job can still move on from by itself —
+// worth polling for. Config/failure states need an explicit retry instead.
+const pendingOcrStatuses = new Set(["uploaded", "processing"]);
+const retryableOcrStatuses = new Set([
+  "ocr_configuration_required",
+  "ocr_failed",
+]);
 
 const demoCases: CaseItem[] = [
   {
@@ -114,6 +123,7 @@ export default function MandatyWorkspace() {
   const [processing, setProcessing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [retrying, setRetrying] = useState(false);
 
   const selected =
     caseItems.find((item) => item.id === selectedId) ?? caseItems[0];
@@ -130,51 +140,84 @@ export default function MandatyWorkspace() {
     [caseItems, filter, query],
   );
 
+  async function loadDocuments(preserveSelection: boolean) {
+    const response = await fetch("/api/documents", { cache: "no-store" });
+    if (!response.ok) return null;
+    const result = (await response.json()) as {
+      documents?: Array<{
+        id: string;
+        status: string;
+        created_at: string;
+        registration_number: string | null;
+        event_at: string | null;
+        case_number: string | null;
+        sender: string | null;
+        previewUrl: string | null;
+      }>;
+    };
+    if (!result.documents?.length) return null;
+    const mapped: CaseItem[] = result.documents.map((document) => ({
+      id: document.case_number || document.id.slice(0, 13).toUpperCase(),
+      documentId: document.id,
+      plate: document.registration_number || "OCR…",
+      sender: document.sender || "Nowy dokument z telefonu",
+      eventAt: document.event_at || "Oczekuje na OCR",
+      receivedAt: new Date(document.created_at).toLocaleString("pl-PL", {
+        day: "2-digit",
+        month: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      deadline: "—",
+      status:
+        document.status === "ready" ||
+        document.status === "needs_review" ||
+        document.status === "ocr_failed"
+          ? "Do weryfikacji"
+          : "Nowa",
+      customer: "—",
+      agreement: "—",
+      previewUrl: document.previewUrl,
+      ocrStatus: document.status,
+    }));
+    setCaseItems(mapped);
+    setSelectedId((current) =>
+      preserveSelection && mapped.some((item) => item.id === current)
+        ? current
+        : mapped[0].id,
+    );
+    return mapped;
+  }
+
   useEffect(() => {
-    fetch("/api/documents", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) return;
-        const result = (await response.json()) as {
-          documents?: Array<{
-            id: string;
-            status: string;
-            created_at: string;
-            registration_number: string | null;
-            event_at: string | null;
-            case_number: string | null;
-            sender: string | null;
-            previewUrl: string | null;
-          }>;
-        };
-        if (!result.documents?.length) return;
-        const mapped: CaseItem[] = result.documents.map((document) => ({
-          id: document.case_number || document.id.slice(0, 13).toUpperCase(),
-          plate: document.registration_number || "OCR…",
-          sender: document.sender || "Nowy dokument z telefonu",
-          eventAt: document.event_at || "Oczekuje na OCR",
-          receivedAt: new Date(document.created_at).toLocaleString("pl-PL", {
-            day: "2-digit",
-            month: "2-digit",
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-          deadline: "—",
-          status:
-            document.status === "ready" ||
-            document.status === "needs_review" ||
-            document.status === "ocr_failed"
-              ? "Do weryfikacji"
-              : "Nowa",
-          customer: "—",
-          agreement: "—",
-          previewUrl: document.previewUrl,
-          ocrStatus: document.status,
-        }));
-        setCaseItems(mapped);
-        setSelectedId(mapped[0].id);
-      })
-      .catch(() => null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount pattern
+    loadDocuments(false).catch(() => null);
   }, []);
+
+  useEffect(() => {
+    const hasPending = caseItems.some(
+      (item) => item.ocrStatus && pendingOcrStatuses.has(item.ocrStatus),
+    );
+    if (!hasPending) return;
+    const interval = window.setInterval(() => {
+      loadDocuments(true).catch(() => null);
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, [caseItems]);
+
+  async function retryOcr() {
+    if (!selected.documentId || retrying) return;
+    setRetrying(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${selected.documentId}/retry`,
+        { method: "POST" },
+      );
+      if (response.ok) await loadDocuments(true);
+    } finally {
+      setRetrying(false);
+    }
+  }
 
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
@@ -253,6 +296,7 @@ export default function MandatyWorkspace() {
         throw new Error(result.error || "Nie udało się przesłać dokumentu.");
       setUploadedFiles([]);
       setScanOpen(false);
+      await loadDocuments(true);
     } catch (reason) {
       setUploadError(
         reason instanceof Error
@@ -536,7 +580,9 @@ export default function MandatyWorkspace() {
                         <strong>
                           {selected.ocrStatus === "ready"
                             ? "Analiza zakończona"
-                            : selected.ocrStatus === "ocr_failed"
+                            : selected.ocrStatus === "ocr_failed" ||
+                                selected.ocrStatus ===
+                                  "ocr_configuration_required"
                               ? "Analiza wymaga ponowienia"
                               : selected.ocrStatus
                                 ? "Analiza w toku"
@@ -550,6 +596,17 @@ export default function MandatyWorkspace() {
                             ? selected.ocrStatus.replaceAll("_", " ")
                             : "Rozpoznano 8 z 9 pól"}
                       </small>
+                      {selected.ocrStatus &&
+                        retryableOcrStatuses.has(selected.ocrStatus) && (
+                          <button
+                            type="button"
+                            className={styles.textButton}
+                            disabled={retrying}
+                            onClick={retryOcr}
+                          >
+                            {retrying ? "Ponawiam…" : "Ponów analizę OCR"}
+                          </button>
+                        )}
                     </div>
                     <section className={styles.formSection}>
                       <div className={styles.sectionHeading}>

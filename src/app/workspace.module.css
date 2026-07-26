@@ -317,7 +317,7 @@
 }
 .workspace {
   height: calc(100dvh - 224px);
-  min-height: 580px;
+  min-height: 720px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 16px;
