@@ -177,6 +177,17 @@ create policy bug_reports_read on public.bug_reports for select using(public.has
 create policy bug_reports_insert on public.bug_reports for insert with check(public.is_org_member(organization_id) and reporter_id=auth.uid());
 create policy bug_reports_update on public.bug_reports for update using(public.has_org_role(organization_id,array['admin']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin']::public.app_role[]));
 
+create table if not exists public.drivers (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  first_name text not null default '', last_name text not null default '', phone text not null default '', email text not null default '',
+  license_number text not null default '', license_valid_until date, status text not null default 'Dostępny',
+  created_at timestamptz not null default now()
+);
+alter table public.drivers enable row level security;
+drop policy if exists drivers_read on public.drivers; drop policy if exists drivers_write on public.drivers;
+create policy drivers_read on public.drivers for select using(public.is_org_member(organization_id));
+create policy drivers_write on public.drivers for all using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
+
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('mandate-documents','mandate-documents',false,15728640,array['application/pdf','image/jpeg','image/png','image/tiff','image/heic','image/heif'])
 on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;

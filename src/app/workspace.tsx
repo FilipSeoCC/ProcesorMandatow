@@ -226,6 +226,7 @@ export default function MandatyWorkspace() {
   const [retrying, setRetrying] = useState(false);
   const [matching, setMatching] = useState(false);
   const [matchMessage, setMatchMessage] = useState<string | null>(null);
+  const [matchOk, setMatchOk] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [team, setTeam] = useState<
     Array<{ userId: string; role: string; email: string | null; name: string | null }>
@@ -270,6 +271,7 @@ export default function MandatyWorkspace() {
       responsibleEmail: selected.responsibleEmail ?? "",
     });
     setMatchMessage(null);
+    setMatchOk(false);
     setSaveError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.id]);
@@ -616,6 +618,7 @@ export default function MandatyWorkspace() {
     if (!selected.documentId || matching) return;
     setMatching(true);
     setMatchMessage(null);
+    setMatchOk(false);
     try {
       const response = await fetch(
         `/api/documents/${selected.documentId}/match`,
@@ -632,6 +635,7 @@ export default function MandatyWorkspace() {
           responsibleEmail: data.responsibleEmail ?? current.responsibleEmail,
         }));
         setMatchMessage("Znaleziono dopasowanie — sprawdź dane i zatwierdź.");
+        setMatchOk(true);
       } else {
         setMatchMessage(
           data.reason || "Nie znaleziono dopasowania — uzupełnij dane ręcznie.",
@@ -1285,7 +1289,7 @@ export default function MandatyWorkspace() {
                       {selected.documentId && (
                         <button
                           type="button"
-                          className={styles.textButton}
+                          className={styles.textButtonFramed}
                           disabled={
                             retrying ||
                             (selected.ocrStatus
@@ -1367,7 +1371,9 @@ export default function MandatyWorkspace() {
                       )}
                     </section>
                     {matchMessage && (
-                      <p className={styles.uploadError}>{matchMessage}</p>
+                      <p className={matchOk ? styles.matchSuccess : styles.uploadError}>
+                        {matchMessage}
+                      </p>
                     )}
                     <section className={styles.formSection}>
                       <div className={styles.sectionHeading}>

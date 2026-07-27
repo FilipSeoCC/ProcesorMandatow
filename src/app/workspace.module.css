@@ -192,6 +192,10 @@
   align-items: center;
   gap: 10px;
 }
+.topbarActions {
+  /* Leaves room for the fixed-position "Zglos blad" button in the same corner. */
+  margin-right: 150px;
+}
 .primaryButton,
 .secondaryButton,
 .helpButton {
@@ -1046,6 +1050,25 @@
   cursor: pointer;
   padding: 0 5px;
 }
+.textButtonFramed {
+  min-height: 30px;
+  color: var(--blue);
+  background: #fff;
+  border: 1px solid var(--blue);
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0 11px;
+  white-space: nowrap;
+}
+.textButtonFramed:hover {
+  background: var(--blue-soft);
+}
+.textButtonFramed:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .formFooter {
   flex-shrink: 0;
   background: #fff;
@@ -1249,6 +1272,15 @@
   padding: 9px 11px;
   background: #fff1f2;
   color: #b42336;
+  font-size: 10px;
+  font-weight: 650;
+}
+.matchSuccess {
+  margin-top: 10px;
+  border-radius: 9px;
+  padding: 9px 11px;
+  background: var(--green-soft);
+  color: var(--green);
   font-size: 10px;
   font-weight: 650;
 }

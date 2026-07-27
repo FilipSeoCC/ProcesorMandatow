@@ -18,7 +18,7 @@ type AssignmentRow = {
   customer_id: string;
   valid_from: string;
 };
-type CustomerRow = { id: string; name: string };
+type CustomerRow = { id: string; name: string; email?: string; tax_id?: string };
 
 function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
@@ -62,26 +62,29 @@ export async function GET(request: Request) {
   const customerIds = [
     ...new Set(assignments.map((assignment) => assignment.customer_id)),
   ];
-  let customerById = new Map<string, string>();
+  let customerById = new Map<string, CustomerRow>();
   if (customerIds.length) {
     const customersResponse = await fetch(
-      `${url}/rest/v1/customers?select=id,name&organization_id=eq.${member.organizationId}&id=in.(${customerIds.join(",")})`,
+      `${url}/rest/v1/customers?select=id,name,email,tax_id&organization_id=eq.${member.organizationId}&id=in.(${customerIds.join(",")})`,
       { headers, cache: "no-store" },
     );
     if (customersResponse.ok) {
       const customers = (await customersResponse.json()) as CustomerRow[];
-      customerById = new Map(customers.map((customer) => [customer.id, customer.name]));
+      customerById = new Map(customers.map((customer) => [customer.id, customer]));
     }
   }
 
   const result = vehicles.map((vehicle) => {
     const assignment = assignmentByVehicle.get(vehicle.id);
+    const customer = assignment ? customerById.get(assignment.customer_id) : undefined;
     return {
       id: vehicle.id,
       brand: vehicle.brand,
       model: vehicle.model,
       registration: vehicle.registration_number,
-      customer: assignment ? customerById.get(assignment.customer_id) ?? "" : "Flota wewnętrzna",
+      customer: customer?.name ?? (assignment ? "" : "Flota wewnętrzna"),
+      customerEmail: customer?.email ?? "",
+      customerTaxId: customer?.tax_id ?? "",
       assignedAt: assignment?.valid_from ?? "",
     };
   });
@@ -97,6 +100,8 @@ export async function POST(request: Request) {
   const model = text(body?.model, 80);
   const registration = text(body?.registration, 15).toUpperCase();
   const customerName = text(body?.customer, 200);
+  const customerEmail = text(body?.customerEmail, 200);
+  const customerTaxId = text(body?.customerTaxId, 20);
   const assignedAtRaw = text(body?.assignedAt, 40);
   const assignedAt = assignedAtRaw ? new Date(assignedAtRaw) : null;
   if (!brand || !model || !registration || !customerName || !assignedAt || Number.isNaN(assignedAt.valueOf()))
@@ -115,18 +120,24 @@ export async function POST(request: Request) {
   const assignedAtIso = assignedAt.toISOString();
 
   const existingCustomerResponse = await fetch(
-    `${url}/rest/v1/customers?select=id&organization_id=eq.${member.organizationId}&name=eq.${encodeURIComponent(customerName)}&limit=1`,
+    `${url}/rest/v1/customers?select=id,email,tax_id&organization_id=eq.${member.organizationId}&name=eq.${encodeURIComponent(customerName)}&limit=1`,
     { headers, cache: "no-store" },
   );
   const existingCustomers = existingCustomerResponse.ok
     ? ((await existingCustomerResponse.json()) as CustomerRow[])
     : [];
-  let customerId = existingCustomers[0]?.id ?? null;
+  const existingCustomer = existingCustomers[0] ?? null;
+  let customerId = existingCustomer?.id ?? null;
   if (!customerId) {
     const createCustomer = await fetch(`${url}/rest/v1/customers`, {
       method: "POST",
       headers: { ...jsonHeaders, Prefer: "return=representation" },
-      body: JSON.stringify({ organization_id: member.organizationId, name: customerName }),
+      body: JSON.stringify({
+        organization_id: member.organizationId,
+        name: customerName,
+        email: customerEmail,
+        tax_id: customerTaxId,
+      }),
     });
     if (!createCustomer.ok)
       return NextResponse.json(
@@ -135,6 +146,21 @@ export async function POST(request: Request) {
       );
     const created = (await createCustomer.json()) as CustomerRow[];
     customerId = created[0]?.id ?? null;
+  } else if (
+    (customerEmail && customerEmail !== existingCustomer?.email) ||
+    (customerTaxId && customerTaxId !== existingCustomer?.tax_id)
+  ) {
+    await fetch(
+      `${url}/rest/v1/customers?id=eq.${customerId}&organization_id=eq.${member.organizationId}`,
+      {
+        method: "PATCH",
+        headers: { ...jsonHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          ...(customerEmail ? { email: customerEmail } : {}),
+          ...(customerTaxId ? { tax_id: customerTaxId } : {}),
+        }),
+      },
+    );
   }
   if (!customerId)
     return NextResponse.json(

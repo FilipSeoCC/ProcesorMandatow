@@ -1,7 +1,7 @@
 "use client";
 
 import { CircleAlert, Phone, Plus, Search, Trash2, UsersRound, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import styles from "./fleet-manager.module.css";
 
 export type Employee = {
@@ -13,12 +13,6 @@ export type Employee = {
   licenseUntil: string;
   status: "Dostępny" | "W trasie" | "Urlop" | "Nieaktywny";
 };
-
-const initialEmployees: Employee[] = [
-  { id: "1", name: "Wadim Kowalczyk", phone: "+48 500 111 222", email: "wadim@flotaflow.pl", license: "12345/26/2020", licenseUntil: "2029-04-10", status: "Dostępny" },
-  { id: "2", name: "Adam Piotrowski", phone: "+48 500 222 333", email: "adam@flotaflow.pl", license: "98765/25/2019", licenseUntil: "2028-11-02", status: "W trasie" },
-  { id: "3", name: "Marta Zawadzka", phone: "+48 500 333 444", email: "marta@flotaflow.pl", license: "55221/24/2021", licenseUntil: "2027-06-18", status: "Urlop" },
-];
 
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -36,21 +30,47 @@ const statusClass: Record<Employee["status"], string> = {
   "Nieaktywny": styles.activeStatus,
 };
 
+const emptyForm = {
+  firstName: "",
+  lastName: "",
+  phone: "",
+  email: "",
+  license: "",
+  licenseUntil: "",
+  status: "Dostępny" as Employee["status"],
+};
+
 export default function Employees() {
-  const [employees, setEmployees] = useState(initialEmployees);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [now] = useState(() => Date.now());
-  const [form, setForm] = useState({
-    firstName: "",
-    lastName: "",
-    phone: "",
-    email: "",
-    license: "",
-    licenseUntil: "",
-    status: "Dostępny" as Employee["status"],
-  });
+  const [form, setForm] = useState(emptyForm);
+
+  async function loadEmployees() {
+    try {
+      const response = await fetch("/api/fleet/drivers", { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Nie udało się pobrać pracowników.");
+      setEmployees(data.employees ?? []);
+      setLoadError(null);
+    } catch (reason) {
+      setLoadError(reason instanceof Error ? reason.message : "Nie udało się pobrać pracowników.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount pattern
+    loadEmployees();
+  }, []);
 
   const filtered = useMemo(
     () =>
@@ -62,7 +82,30 @@ export default function Employees() {
     [employees, query],
   );
 
-  function addEmployee() {
+  function openAdd() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setError(null);
+    setAddOpen(true);
+  }
+
+  function openEdit(employee: Employee) {
+    const [firstName, ...rest] = employee.name.split(" ");
+    setEditingId(employee.id);
+    setForm({
+      firstName: firstName ?? "",
+      lastName: rest.join(" "),
+      phone: employee.phone,
+      email: employee.email,
+      license: employee.license,
+      licenseUntil: employee.licenseUntil,
+      status: employee.status,
+    });
+    setError(null);
+    setAddOpen(true);
+  }
+
+  async function saveEmployee() {
     const firstName = form.firstName.trim();
     const lastName = form.lastName.trim();
     const phone = form.phone.trim();
@@ -72,25 +115,56 @@ export default function Employees() {
       return;
     }
     const name = `${firstName} ${lastName}`;
-    if (employees.some((employee) => normalize(employee.name) === normalize(name))) {
+    if (
+      !editingId &&
+      employees.some((employee) => normalize(employee.name) === normalize(name))
+    ) {
       setError("Pracownik o tym imieniu i nazwisku już istnieje.");
       return;
     }
-    if (new Date(form.licenseUntil) < new Date()) {
+    if (!editingId && new Date(form.licenseUntil) < new Date()) {
       setError("Data ważności prawa jazdy musi przypadać w przyszłości.");
       return;
     }
-    setEmployees((current) => [
-      { id: `employee-${Date.now()}`, name, phone, email: form.email.trim(), license, licenseUntil: form.licenseUntil, status: form.status },
-      ...current,
-    ]);
-    setForm({ firstName: "", lastName: "", phone: "", email: "", license: "", licenseUntil: "", status: "Dostępny" });
+    setSaving(true);
     setError(null);
-    setAddOpen(false);
+    try {
+      const response = await fetch("/api/fleet/drivers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: editingId,
+          firstName,
+          lastName,
+          phone,
+          email: form.email.trim(),
+          license,
+          licenseUntil: form.licenseUntil,
+          status: form.status,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Nie udało się zapisać pracownika.");
+      await loadEmployees();
+      setForm(emptyForm);
+      setEditingId(null);
+      setAddOpen(false);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Nie udało się zapisać pracownika.");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function removeEmployee(id: string) {
-    setEmployees((current) => current.filter((employee) => employee.id !== id));
+  async function removeEmployee(id: string) {
+    if (removingId) return;
+    setRemovingId(id);
+    try {
+      const response = await fetch(`/api/fleet/drivers/${id}`, { method: "DELETE" });
+      if (response.ok) setEmployees((current) => current.filter((employee) => employee.id !== id));
+    } finally {
+      setRemovingId(null);
+    }
   }
 
   return (
@@ -147,7 +221,7 @@ export default function Employees() {
             <button
               type="button"
               className={styles.addVehicleButton}
-              onClick={() => { setAddOpen(true); setError(null); }}
+              onClick={openAdd}
             >
               <Plus size={17} />
               Dodaj pracownika
@@ -185,10 +259,19 @@ export default function Employees() {
                   <td>
                     <span className={statusClass[employee.status]}>{employee.status}</span>
                   </td>
-                  <td>
+                  <td className={styles.rowActions}>
+                    <button
+                      type="button"
+                      className={styles.editVehicle}
+                      onClick={() => openEdit(employee)}
+                      aria-label={`Edytuj pracownika ${employee.name}`}
+                    >
+                      Edytuj
+                    </button>
                     <button
                       type="button"
                       className={styles.removeVehicle}
+                      disabled={removingId === employee.id}
                       onClick={() => removeEmployee(employee.id)}
                       aria-label={`Usuń pracownika ${employee.name}`}
                     >
@@ -206,14 +289,25 @@ export default function Employees() {
               <div>
                 <code>{employee.phone}</code>
                 <span className={statusClass[employee.status]}>{employee.status}</span>
-                <button
-                  type="button"
-                  className={styles.removeVehicle}
-                  onClick={() => removeEmployee(employee.id)}
-                  aria-label={`Usuń pracownika ${employee.name}`}
-                >
-                  <Trash2 size={15} />
-                </button>
+                <span className={styles.mobileRowActions}>
+                  <button
+                    type="button"
+                    className={styles.editVehicle}
+                    onClick={() => openEdit(employee)}
+                    aria-label={`Edytuj pracownika ${employee.name}`}
+                  >
+                    Edytuj
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.removeVehicle}
+                    disabled={removingId === employee.id}
+                    onClick={() => removeEmployee(employee.id)}
+                    aria-label={`Usuń pracownika ${employee.name}`}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </span>
               </div>
               <h3>{employee.name}</h3>
               <p>{employee.email || "Brak e-maila"}</p>
@@ -221,7 +315,9 @@ export default function Employees() {
             </article>
           ))}
         </div>
-        {filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pracowników.</div>}
+        {loading && <div className={styles.empty}>Ładowanie zespołu…</div>}
+        {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
+        {!loading && !loadError && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pracowników.</div>}
       </section>
 
       {addOpen && (
@@ -231,7 +327,7 @@ export default function Employees() {
             <header>
               <div>
                 <span>Struktura zespołu</span>
-                <h2 id="employee-add-title">Dodaj kierowcę</h2>
+                <h2 id="employee-add-title">{editingId ? "Edytuj kierowcę" : "Dodaj kierowcę"}</h2>
               </div>
               <button onClick={() => setAddOpen(false)} aria-label="Zamknij">
                 <X size={21} />
@@ -276,7 +372,7 @@ export default function Employees() {
               <div className={styles.error} role="alert">
                 <CircleAlert size={18} />
                 <span>
-                  <strong>Nie można dodać pracownika</strong>
+                  <strong>Nie można zapisać pracownika</strong>
                   <small>{error}</small>
                 </span>
               </div>
@@ -285,8 +381,8 @@ export default function Employees() {
               <button className={styles.cancel} onClick={() => setAddOpen(false)}>
                 Anuluj
               </button>
-              <button className={styles.confirm} onClick={addEmployee}>
-                Dodaj kierowcę
+              <button className={styles.confirm} disabled={saving} onClick={saveEmployee}>
+                {saving ? "Zapisuję…" : editingId ? "Zapisz zmiany" : "Dodaj kierowcę"}
               </button>
             </footer>
           </section>

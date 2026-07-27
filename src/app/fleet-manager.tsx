@@ -13,6 +13,11 @@ export type FleetVehicle = {
   assignedAt: string;
 };
 
+type FleetVehicleDetail = FleetVehicle & {
+  customerEmail?: string;
+  customerTaxId?: string;
+};
+
 const headerAliases: Record<keyof Omit<FleetVehicle, "id">, string[]> = {
   brand: ["marka", "brand", "manufacturer", "producent"],
   model: ["model", "vehiclemodel", "modelpojazdu"],
@@ -89,7 +94,7 @@ function formatDate(value: string) {
 }
 
 export default function FleetManager({ importOpen, onCloseImport }: { importOpen: boolean; onCloseImport: () => void }) {
-  const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
+  const [vehicles, setVehicles] = useState<FleetVehicleDetail[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -104,11 +109,36 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     model: "",
     registration: "",
     customer: "",
+    customerEmail: "",
+    customerTaxId: "",
     assignedAt: new Date().toISOString().slice(0, 16),
   });
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [editingRegistration, setEditingRegistration] = useState<string | null>(null);
+
+  function openAddVehicle() {
+    setEditingRegistration(null);
+    setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16) });
+    setManualError(null);
+    setManualOpen(true);
+  }
+
+  function openEditVehicle(vehicle: FleetVehicleDetail) {
+    setEditingRegistration(vehicle.registration);
+    setManualForm({
+      brand: vehicle.brand,
+      model: vehicle.model,
+      registration: vehicle.registration,
+      customer: vehicle.customer === "Flota wewnętrzna" ? "" : vehicle.customer,
+      customerEmail: vehicle.customerEmail ?? "",
+      customerTaxId: vehicle.customerTaxId ?? "",
+      assignedAt: vehicle.assignedAt ? vehicle.assignedAt.slice(0, 16) : new Date().toISOString().slice(0, 16),
+    });
+    setManualError(null);
+    setManualOpen(true);
+  }
 
   async function loadVehicles() {
     try {
@@ -191,15 +221,24 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       const response = await fetch("/api/fleet/vehicles", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ brand, model, registration, customer, assignedAt: manualForm.assignedAt }),
+        body: JSON.stringify({
+          brand,
+          model,
+          registration,
+          customer,
+          customerEmail: manualForm.customerEmail.trim(),
+          customerTaxId: manualForm.customerTaxId.trim(),
+          assignedAt: manualForm.assignedAt,
+        }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Nie udało się dodać pojazdu.");
+      if (!response.ok) throw new Error(data.error || "Nie udało się zapisać pojazdu.");
       await loadVehicles();
-      setManualForm({ brand: "", model: "", registration: "", customer: "", assignedAt: new Date().toISOString().slice(0, 16) });
+      setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16) });
+      setEditingRegistration(null);
       setManualOpen(false);
     } catch (reason) {
-      setManualError(reason instanceof Error ? reason.message : "Nie udało się dodać pojazdu.");
+      setManualError(reason instanceof Error ? reason.message : "Nie udało się zapisać pojazdu.");
     } finally {
       setManualSaving(false);
     }
@@ -230,25 +269,27 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     </section>
 
     <section className={styles.fleetCard}>
-      <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><div className={styles.headerActions}><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label><button type="button" className={styles.addVehicleButton} onClick={() => { setManualOpen(true); setManualError(null); }}><Plus size={17} />Dodaj pojazd</button></div></div>
-      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Przekazano od</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td><td><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
-      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.activeStatus}>Aktywny</span><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
+      <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><div className={styles.headerActions}><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label><button type="button" className={styles.addVehicleButton} onClick={openAddVehicle}><Plus size={17} />Dodaj pojazd</button></div></div>
+      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Umowa od dnia</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td><td className={styles.rowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.activeStatus}>Aktywny</span><span className={styles.mobileRowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></span></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Umowa od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
       {loading && <div className={styles.empty}>Ładowanie floty…</div>}
       {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
       {!loading && !loadError && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
     </section>
 
     {manualOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-manual-title"><button className={styles.backdrop} onClick={() => setManualOpen(false)} aria-label="Zamknij" /><section className={styles.modal}>
-      <header><div><span>Nowy pojazd</span><h2 id="fleet-manual-title">Dodaj pojazd ręcznie</h2></div><button onClick={() => setManualOpen(false)} aria-label="Zamknij"><X size={21} /></button></header>
+      <header><div><span>{editingRegistration ? "Edycja pojazdu" : "Nowy pojazd"}</span><h2 id="fleet-manual-title">{editingRegistration ? `Edytuj pojazd ${editingRegistration}` : "Dodaj pojazd ręcznie"}</h2></div><button onClick={() => setManualOpen(false)} aria-label="Zamknij"><X size={21} /></button></header>
       <div className={styles.manualForm}>
         <label>Marka<input value={manualForm.brand} onChange={(event) => setManualForm((current) => ({ ...current, brand: event.target.value }))} placeholder="Np. Ford" /></label>
         <label>Model<input value={manualForm.model} onChange={(event) => setManualForm((current) => ({ ...current, model: event.target.value }))} placeholder="Np. Transit Custom" /></label>
         <label>Numer rejestracyjny<input value={manualForm.registration} onChange={(event) => setManualForm((current) => ({ ...current, registration: event.target.value }))} placeholder="WI 1234A" /></label>
         <label>Klient<input value={manualForm.customer} onChange={(event) => setManualForm((current) => ({ ...current, customer: event.target.value }))} placeholder="Nazwa klienta lub imię i nazwisko" /></label>
-        <label>Data i czas przekazania<input type="datetime-local" value={manualForm.assignedAt} onChange={(event) => setManualForm((current) => ({ ...current, assignedAt: event.target.value }))} /></label>
+        <label>E-mail klienta<input type="email" value={manualForm.customerEmail} onChange={(event) => setManualForm((current) => ({ ...current, customerEmail: event.target.value }))} placeholder="klient@firma.pl" /></label>
+        <label>NIP / PESEL<input value={manualForm.customerTaxId} onChange={(event) => setManualForm((current) => ({ ...current, customerTaxId: event.target.value }))} placeholder="Opcjonalnie" /></label>
+        <label>Umowa od dnia<input type="datetime-local" value={manualForm.assignedAt} onChange={(event) => setManualForm((current) => ({ ...current, assignedAt: event.target.value }))} /><small className={styles.fieldHint}>Data rozpoczęcia przypisania — może być z przeszłości.</small></label>
       </div>
-      {manualError && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można dodać pojazdu</strong><small>{manualError}</small></span></div>}
-      <footer><button className={styles.cancel} onClick={() => setManualOpen(false)}>Anuluj</button><button className={styles.confirm} disabled={manualSaving} onClick={addVehicle}>{manualSaving ? "Zapisuję…" : "Dodaj pojazd"}</button></footer>
+      {manualError && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można zapisać pojazdu</strong><small>{manualError}</small></span></div>}
+      <footer><button className={styles.cancel} onClick={() => setManualOpen(false)}>Anuluj</button><button className={styles.confirm} disabled={manualSaving} onClick={addVehicle}>{manualSaving ? "Zapisuję…" : editingRegistration ? "Zapisz zmiany" : "Dodaj pojazd"}</button></footer>
     </section></div>}
 
     {importOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-import-title"><button className={styles.backdrop} onClick={onCloseImport} aria-label="Zamknij import" /><section className={styles.modal}>
