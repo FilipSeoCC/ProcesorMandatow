@@ -1,6 +1,6 @@
 "use client";
 
-import { CarFront, CheckCircle2, CircleAlert, Download, FileSpreadsheet, Search, Upload, X } from "lucide-react";
+import { CarFront, CheckCircle2, CircleAlert, Download, FileSpreadsheet, Plus, Search, Trash2, Upload, X } from "lucide-react";
 import { ChangeEvent, useMemo, useState } from "react";
 import styles from "./fleet-manager.module.css";
 
@@ -103,6 +103,15 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState<number | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    brand: "",
+    model: "",
+    registration: "",
+    customer: "",
+    assignedAt: new Date().toISOString().slice(0, 16),
+  });
+  const [manualError, setManualError] = useState<string | null>(null);
 
   const filtered = useMemo(() => vehicles.filter((vehicle) => `${vehicle.brand} ${vehicle.model} ${vehicle.registration} ${vehicle.customer}`.toLowerCase().includes(query.toLowerCase())), [query, vehicles]);
   const invalidRows = preview.filter((row) => !row.brand || !row.model || !row.registration || !row.customer || !row.assignedAt || Number.isNaN(new Date(row.assignedAt).getTime()));
@@ -134,6 +143,32 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     setImported(preview.length); setPreview([]); setFileName("");
   }
 
+  function addVehicle() {
+    const brand = manualForm.brand.trim();
+    const model = manualForm.model.trim();
+    const registration = manualForm.registration.trim().toUpperCase();
+    const customer = manualForm.customer.trim();
+    if (!brand || !model || !registration || !customer || !manualForm.assignedAt) {
+      setManualError("Uzupełnij wszystkie pola.");
+      return;
+    }
+    if (vehicles.some((vehicle) => normalize(vehicle.registration) === normalize(registration))) {
+      setManualError("Pojazd z tym numerem rejestracyjnym już istnieje.");
+      return;
+    }
+    setVehicles((current) => [
+      { id: `manual-${Date.now()}`, brand, model, registration, customer, assignedAt: manualForm.assignedAt },
+      ...current,
+    ]);
+    setManualForm({ brand: "", model: "", registration: "", customer: "", assignedAt: new Date().toISOString().slice(0, 16) });
+    setManualError(null);
+    setManualOpen(false);
+  }
+
+  function removeVehicle(id: string) {
+    setVehicles((current) => current.filter((vehicle) => vehicle.id !== id));
+  }
+
   function downloadTemplate() {
     const content = "marka;model;nr_rej;klient;data_czas\nFord;Transit;WI1234A;Przykładowy Klient Sp. z o.o.;2026-07-26T10:30";
     const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
@@ -148,11 +183,24 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     </section>
 
     <section className={styles.fleetCard}>
-      <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label></div>
-      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Przekazano od</th><th>Status</th></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td></tr>)}</tbody></table></div>
-      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.activeStatus}>Aktywny</span></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
+      <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><div className={styles.headerActions}><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label><button type="button" className={styles.addVehicleButton} onClick={() => { setManualOpen(true); setManualError(null); }}><Plus size={17} />Dodaj pojazd</button></div></div>
+      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Przekazano od</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td><td><button type="button" className={styles.removeVehicle} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.activeStatus}>Aktywny</span><button type="button" className={styles.removeVehicle} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
       {filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
     </section>
+
+    {manualOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-manual-title"><button className={styles.backdrop} onClick={() => setManualOpen(false)} aria-label="Zamknij" /><section className={styles.modal}>
+      <header><div><span>Nowy pojazd</span><h2 id="fleet-manual-title">Dodaj pojazd ręcznie</h2></div><button onClick={() => setManualOpen(false)} aria-label="Zamknij"><X size={21} /></button></header>
+      <div className={styles.manualForm}>
+        <label>Marka<input value={manualForm.brand} onChange={(event) => setManualForm((current) => ({ ...current, brand: event.target.value }))} placeholder="Np. Ford" /></label>
+        <label>Model<input value={manualForm.model} onChange={(event) => setManualForm((current) => ({ ...current, model: event.target.value }))} placeholder="Np. Transit Custom" /></label>
+        <label>Numer rejestracyjny<input value={manualForm.registration} onChange={(event) => setManualForm((current) => ({ ...current, registration: event.target.value }))} placeholder="WI 1234A" /></label>
+        <label>Klient<input value={manualForm.customer} onChange={(event) => setManualForm((current) => ({ ...current, customer: event.target.value }))} placeholder="Nazwa klienta lub imię i nazwisko" /></label>
+        <label>Data i czas przekazania<input type="datetime-local" value={manualForm.assignedAt} onChange={(event) => setManualForm((current) => ({ ...current, assignedAt: event.target.value }))} /></label>
+      </div>
+      {manualError && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można dodać pojazdu</strong><small>{manualError}</small></span></div>}
+      <footer><button className={styles.cancel} onClick={() => setManualOpen(false)}>Anuluj</button><button className={styles.confirm} onClick={addVehicle}>Dodaj pojazd</button></footer>
+    </section></div>}
 
     {importOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-import-title"><button className={styles.backdrop} onClick={onCloseImport} aria-label="Zamknij import" /><section className={styles.modal}>
       <header><div><span>Import danych</span><h2 id="fleet-import-title">Dodaj lub zaktualizuj flotę</h2></div><button onClick={onCloseImport} aria-label="Zamknij"><X size={21} /></button></header>
