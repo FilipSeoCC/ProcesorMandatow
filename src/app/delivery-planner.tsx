@@ -47,48 +47,6 @@ const depot = {
   longitude: 20.9358,
 };
 const routeDraftKey = "flotaflow-route-draft-v1";
-const initialDeliveries: Delivery[] = [
-  {
-    id: "DST-104",
-    vehicle: "Toyota Proace · WI 2847K",
-    customer: "Nova Bud Sp. z o.o.",
-    address: "Puławska 427, Warszawa",
-    latitude: 52.1455,
-    longitude: 21.0218,
-    serviceMinutes: 20,
-    priority: 4,
-  },
-  {
-    id: "DST-105",
-    vehicle: "Ford Transit · WW 91R2",
-    customer: "Verto Group Sp. z o.o.",
-    address: "Postępu 14, Warszawa",
-    latitude: 52.1798,
-    longitude: 20.9981,
-    serviceMinutes: 25,
-    priority: 3,
-  },
-  {
-    id: "DST-106",
-    vehicle: "Mercedes Vito · WX 5520M",
-    customer: "ABC Instalacje",
-    address: "Mickiewicza 22, Łomianki",
-    latitude: 52.3342,
-    longitude: 20.8862,
-    serviceMinutes: 20,
-    priority: 2,
-  },
-  {
-    id: "DST-107",
-    vehicle: "Renault Master · WPR 77A9",
-    customer: "M-Projekt",
-    address: "Sienkiewicza 31, Pruszków",
-    latitude: 52.1692,
-    longitude: 20.8026,
-    serviceMinutes: 30,
-    priority: 1,
-  },
-];
 
 function storedAccessToken() {
   for (let index = 0; index < localStorage.length; index++) {
@@ -103,10 +61,9 @@ function storedAccessToken() {
 }
 
 export default function DeliveryPlanner() {
-  const [deliveries, setDeliveries] = useState(initialDeliveries);
-  const [selected, setSelected] = useState<string[]>(
-    initialDeliveries.map((item) => item.id),
-  );
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [deliveriesLoading, setDeliveriesLoading] = useState(true);
+  const [selected, setSelected] = useState<string[]>([]);
   const [result, setResult] = useState<Optimization | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,6 +131,41 @@ export default function DeliveryPlanner() {
       );
   }, [completedIds, draftReady, failedIds, result, routeDirty, selected]);
 
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const token = storedAccessToken();
+        const response = await fetch("/api/routes/orders", {
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        });
+        const data = await response.json();
+        if (!response.ok)
+          throw new Error(data.error || "Nie udało się pobrać dostaw.");
+        if (cancelled) return;
+        setDeliveries(data.orders);
+        setSelected((current) =>
+          current.length
+            ? current
+            : data.orders.map((item: Delivery) => item.id),
+        );
+      } catch (reason) {
+        if (!cancelled)
+          setError(
+            reason instanceof Error
+              ? reason.message
+              : "Nie udało się pobrać dostaw.",
+          );
+      } finally {
+        if (!cancelled) setDeliveriesLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function addDelivery() {
     const customer = addForm.customer.trim();
     const address = addForm.address.trim();
@@ -191,32 +183,37 @@ export default function DeliveryPlanner() {
     setAddError(null);
     try {
       const token = storedAccessToken();
-      const response = await fetch("/api/routes/geocode", {
+      const authHeader: Record<string, string> = token
+        ? { Authorization: `Bearer ${token}` }
+        : {};
+      const geocodeResponse = await fetch("/api/routes/geocode", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json", ...authHeader },
         body: JSON.stringify({ address }),
       });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.error || "Nie udało się znaleźć adresu.");
-      const id = `DST-${Date.now().toString(36).toUpperCase()}`;
-      setDeliveries((current) => [
-        ...current,
-        {
-          id,
-          vehicle: addForm.vehicle.trim() || "Nieprzypisany",
+      const geocodeData = await geocodeResponse.json();
+      if (!geocodeResponse.ok)
+        throw new Error(geocodeData.error || "Nie udało się znaleźć adresu.");
+
+      const orderResponse = await fetch("/api/routes/orders", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeader },
+        body: JSON.stringify({
           customer,
-          address: data.formattedAddress || address,
-          latitude: data.latitude,
-          longitude: data.longitude,
+          vehicle: addForm.vehicle.trim(),
+          address: geocodeData.formattedAddress || address,
+          latitude: geocodeData.latitude,
+          longitude: geocodeData.longitude,
           serviceMinutes,
           priority: Math.min(5, Math.max(1, priority || 3)),
-        },
-      ]);
-      setSelected((current) => [...current, id]);
+        }),
+      });
+      const orderData = await orderResponse.json();
+      if (!orderResponse.ok)
+        throw new Error(orderData.error || "Nie udało się dodać dostawy.");
+      const created: Delivery = orderData.order;
+      setDeliveries((current) => [...current, created]);
+      setSelected((current) => [...current, created.id]);
       setResult(null);
       setRouteDirty(false);
       setAddForm({
@@ -236,7 +233,26 @@ export default function DeliveryPlanner() {
     }
   }
 
-  function removeDelivery(id: string) {
+  async function removeDelivery(id: string) {
+    try {
+      const token = storedAccessToken();
+      const response = await fetch(
+        `/api/routes/orders/${encodeURIComponent(id)}`,
+        {
+          method: "DELETE",
+          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "Nie udało się usunąć dostawy.");
+      }
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Nie udało się usunąć dostawy.",
+      );
+      return;
+    }
     setDeliveries((current) => current.filter((item) => item.id !== id));
     setSelected((current) => current.filter((item) => item !== id));
     setResult(null);
@@ -468,6 +484,12 @@ export default function DeliveryPlanner() {
                   {geocoding ? "Wyszukuję adres…" : "Dodaj do listy"}
                 </button>
               </div>
+            )}
+            {deliveriesLoading && deliveries.length === 0 && (
+              <p className={styles.loading}>
+                <LoaderCircle className={styles.spin} size={17} />
+                Ładowanie dzisiejszych dostaw…
+              </p>
             )}
             <div className={styles.deliveryList}>
               {deliveries.map((delivery) => (

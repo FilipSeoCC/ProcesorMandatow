@@ -40,7 +40,7 @@ alter table public.vehicle_assignments add constraint vehicle_assignment_no_over
 
 create table if not exists public.delivery_orders (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
-  vehicle_id uuid not null, customer_id uuid not null,
+  vehicle_id uuid, customer_id uuid,
   address text not null, latitude double precision not null check(latitude between -90 and 90), longitude double precision not null check(longitude between -180 and 180),
   window_start timestamptz, window_end timestamptz, service_minutes integer not null default 20 check(service_minutes between 0 and 240),
   priority smallint not null default 1 check(priority between 1 and 5), status text not null default 'ready', created_at timestamptz not null default now(),
@@ -48,6 +48,16 @@ create table if not exists public.delivery_orders (
   foreign key(organization_id,vehicle_id) references public.vehicles(organization_id,id) on delete restrict,
   foreign key(organization_id,customer_id) references public.customers(organization_id,id) on delete restrict
 );
+-- Route planner lets drivers type the vehicle/customer for a stop before Flota
+-- tracks real vehicle_id/customer_id records, so those FKs stay optional and
+-- the free-text labels back the UI in the meantime.
+alter table public.delivery_orders alter column vehicle_id drop not null;
+alter table public.delivery_orders alter column customer_id drop not null;
+alter table public.delivery_orders add column if not exists vehicle_label text not null default '';
+alter table public.delivery_orders add column if not exists customer_name text not null default '';
+alter table public.delivery_orders add column if not exists planned_for date not null default current_date;
+alter table public.delivery_orders add column if not exists created_by uuid references auth.users(id) on delete set null;
+create index if not exists delivery_orders_org_day on public.delivery_orders(organization_id,planned_for);
 create table if not exists public.route_plans (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   planned_for date not null, dispatcher_id uuid references auth.users(id) on delete set null, start_address text not null,
@@ -150,7 +160,7 @@ create policy vehicles_write on public.vehicles for all using(public.has_org_rol
 create policy assignments_read on public.vehicle_assignments for select using(public.is_org_member(organization_id));
 create policy assignments_write on public.vehicle_assignments for all using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
 create policy deliveries_read on public.delivery_orders for select using(public.is_org_member(organization_id));
-create policy deliveries_write on public.delivery_orders for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
+create policy deliveries_write on public.delivery_orders for all using(public.has_org_role(organization_id,array['admin','dispatcher','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office','scanner']::public.app_role[]));
 create policy plans_read on public.route_plans for select using(public.is_org_member(organization_id));
 create policy plans_write on public.route_plans for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
 create policy stops_read on public.route_stops for select using(public.is_org_member(organization_id));
