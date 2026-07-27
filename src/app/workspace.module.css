@@ -774,6 +774,10 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
   letter-spacing: 0.02em;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .status {
   border-radius: 999px;
@@ -781,6 +785,7 @@
   font-size: 9px;
   font-weight: 750;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .statusReview {
   background: var(--amber-soft);
