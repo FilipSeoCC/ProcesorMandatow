@@ -182,6 +182,9 @@
     color: #60728a;
     background: #fff;
     border: 1px solid #dce4ee;
+    transform: translateZ(0);
+    -webkit-transform: translateZ(0);
+    will-change: transform;
   }
 }
 @media (prefers-reduced-motion: reduce) {
