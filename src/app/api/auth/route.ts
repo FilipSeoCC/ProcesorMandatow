@@ -130,6 +130,57 @@ export async function PATCH(request: Request) {
   return NextResponse.json({ ok: true });
 }
 
+export async function PUT(request: Request) {
+  const refreshToken = request.headers
+    .get("cookie")
+    ?.match(/(?:^|;\s*)ff-refresh=([^;]+)/)?.[1];
+  if (!refreshToken)
+    return NextResponse.json(
+      { error: "Brak sesji do odświeżenia." },
+      { status: 401 },
+    );
+  const { url, publishableKey } = getSupabaseServerEnv();
+  if (!url || !publishableKey)
+    return NextResponse.json(
+      { error: "Supabase nie jest skonfigurowany." },
+      { status: 503 },
+    );
+  const refreshResponse = await fetch(
+    `${url}/auth/v1/token?grant_type=refresh_token`,
+    {
+      method: "POST",
+      headers: { apikey: publishableKey, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        refresh_token: decodeURIComponent(refreshToken),
+      }),
+      cache: "no-store",
+    },
+  );
+  const data = (await refreshResponse
+    .json()
+    .catch(() => ({}))) as Partial<AuthSession> & {
+    msg?: string;
+    error_description?: string;
+  };
+  if (!refreshResponse.ok || !data.access_token || !data.refresh_token) {
+    const expired = NextResponse.json(
+      {
+        error:
+          data.msg ||
+          data.error_description ||
+          "Sesja wygasła — zaloguj się ponownie.",
+      },
+      { status: 401 },
+    );
+    expired.cookies.set("ff-access", "", { path: "/", maxAge: 0 });
+    expired.cookies.set("ff-refresh", "", { path: "/", maxAge: 0 });
+    return expired;
+  }
+  const response = NextResponse.json({ ok: true });
+  setSession(response, data as AuthSession);
+  return response;
+}
+
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as {
     action?: string;

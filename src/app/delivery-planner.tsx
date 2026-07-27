@@ -48,18 +48,6 @@ const depot = {
 };
 const routeDraftKey = "flotaflow-route-draft-v1";
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-
 export default function DeliveryPlanner() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [deliveriesLoading, setDeliveriesLoading] = useState(true);
@@ -86,6 +74,8 @@ export default function DeliveryPlanner() {
   const [pendingAction, setPendingAction] = useState<
     "complete" | "failed" | null
   >(null);
+  const [actionSubmitting, setActionSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [failureReason, setFailureReason] = useState("Klient nieobecny");
   const ordered = useMemo(
     () =>
@@ -145,10 +135,7 @@ export default function DeliveryPlanner() {
     let cancelled = false;
     async function load() {
       try {
-        const token = storedAccessToken();
-        const response = await fetch("/api/routes/orders", {
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        });
+        const response = await fetch("/api/routes/orders");
         const data = await response.json();
         if (!response.ok)
           throw new Error(data.error || "Nie udało się pobrać dostaw.");
@@ -192,13 +179,9 @@ export default function DeliveryPlanner() {
     setGeocoding(true);
     setAddError(null);
     try {
-      const token = storedAccessToken();
-      const authHeader: Record<string, string> = token
-        ? { Authorization: `Bearer ${token}` }
-        : {};
       const geocodeResponse = await fetch("/api/routes/geocode", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ address }),
       });
       const geocodeData = await geocodeResponse.json();
@@ -207,7 +190,7 @@ export default function DeliveryPlanner() {
 
       const orderResponse = await fetch("/api/routes/orders", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeader },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           customer,
           vehicle: addForm.vehicle.trim(),
@@ -247,13 +230,9 @@ export default function DeliveryPlanner() {
 
   async function removeDelivery(id: string) {
     try {
-      const token = storedAccessToken();
       const response = await fetch(
         `/api/routes/orders/${encodeURIComponent(id)}`,
-        {
-          method: "DELETE",
-          headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        },
+        { method: "DELETE" },
       );
       if (!response.ok) {
         const data = await response.json().catch(() => null);
@@ -301,30 +280,45 @@ export default function DeliveryPlanner() {
     );
     setRouteDirty(true);
   }
-  function confirmStopAction() {
-    if (!currentStop || !pendingAction) return;
+  async function confirmStopAction() {
+    if (!currentStop || !pendingAction || actionSubmitting) return;
     const status = pendingAction === "complete" ? "completed" : "failed";
+    const stopId = stopIdByDelivery[currentStop.id];
+    setActionError(null);
+    if (planId && stopId) {
+      setActionSubmitting(true);
+      try {
+        const response = await fetch(
+          `/api/routes/plans/${encodeURIComponent(planId)}/stops/${encodeURIComponent(stopId)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status,
+              notes: status === "failed" ? failureReason : "",
+            }),
+          },
+        );
+        if (!response.ok) {
+          const data = await response.json().catch(() => null);
+          throw new Error(
+            data?.error || "Nie udało się zapisać postępu przystanku.",
+          );
+        }
+      } catch (reason) {
+        setActionSubmitting(false);
+        setActionError(
+          reason instanceof Error
+            ? reason.message
+            : "Nie udało się zapisać postępu przystanku.",
+        );
+        return;
+      }
+      setActionSubmitting(false);
+    }
     if (status === "completed")
       setCompletedIds((current) => [...current, currentStop.id]);
     else setFailedIds((current) => [...current, currentStop.id]);
-    const stopId = stopIdByDelivery[currentStop.id];
-    if (planId && stopId) {
-      const token = storedAccessToken();
-      fetch(
-        `/api/routes/plans/${encodeURIComponent(planId)}/stops/${encodeURIComponent(stopId)}`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            status,
-            notes: status === "failed" ? failureReason : "",
-          }),
-        },
-      ).catch((reason) => console.error("Nie udało się zapisać postępu przystanku", reason));
-    }
     setPendingAction(null);
   }
   function postponeCurrent() {
@@ -351,13 +345,9 @@ export default function DeliveryPlanner() {
     setLoading(true);
     setError(null);
     try {
-      const token = storedAccessToken();
       const response = await fetch("/api/routes/optimize", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ depot, returnToDepot: true, stops }),
       });
       const data = await response.json();
@@ -372,10 +362,7 @@ export default function DeliveryPlanner() {
       try {
         const planResponse = await fetch("/api/routes/plans", {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             startAddress: depot.address,
             startLatitude: depot.latitude,
@@ -680,11 +667,21 @@ export default function DeliveryPlanner() {
                 {currentStop.address}
               </p>
               <div>
-                <button onClick={() => setPendingAction("complete")}>
+                <button
+                  onClick={() => {
+                    setActionError(null);
+                    setPendingAction("complete");
+                  }}
+                >
                   <CheckCircle2 size={18} />
                   Auto wydane
                 </button>
-                <button onClick={() => setPendingAction("failed")}>
+                <button
+                  onClick={() => {
+                    setActionError(null);
+                    setPendingAction("failed");
+                  }}
+                >
                   <XCircle size={18} />
                   Nie dostarczono
                 </button>
@@ -811,7 +808,10 @@ export default function DeliveryPlanner() {
             >
               <button
                 className={styles.confirmBackdrop}
-                onClick={() => setPendingAction(null)}
+                onClick={() => {
+                  setPendingAction(null);
+                  setActionError(null);
+                }}
                 aria-label="Anuluj"
               />
               <section className={styles.confirmSheet}>
@@ -840,8 +840,22 @@ export default function DeliveryPlanner() {
                     </select>
                   </label>
                 )}
+                {actionError && (
+                  <p className={styles.error}>
+                    <AlertTriangle size={17} />
+                    {actionError}
+                  </p>
+                )}
                 <div>
-                  <button onClick={() => setPendingAction(null)}>Anuluj</button>
+                  <button
+                    onClick={() => {
+                      setPendingAction(null);
+                      setActionError(null);
+                    }}
+                    disabled={actionSubmitting}
+                  >
+                    Anuluj
+                  </button>
                   <button
                     className={
                       pendingAction === "complete"
@@ -849,10 +863,13 @@ export default function DeliveryPlanner() {
                         : styles.confirmFailure
                     }
                     onClick={confirmStopAction}
+                    disabled={actionSubmitting}
                   >
-                    {pendingAction === "complete"
-                      ? "Potwierdź wydanie"
-                      : "Zapisz nieudaną dostawę"}
+                    {actionSubmitting
+                      ? "Zapisuję…"
+                      : pendingAction === "complete"
+                        ? "Potwierdź wydanie"
+                        : "Zapisz nieudaną dostawę"}
                   </button>
                 </div>
                 <small>

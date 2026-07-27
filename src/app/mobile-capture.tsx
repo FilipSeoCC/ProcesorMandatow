@@ -42,18 +42,6 @@ function renamedFile(file: File, displayName: string) {
   });
 }
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-
 export default function MobileCapture() {
   const [activeTab, setActiveTab] = useState<"scanner" | "routes">("scanner");
   const [online, setOnline] = useState(true);
@@ -143,10 +131,8 @@ export default function MobileCapture() {
       pages.forEach((page) =>
         form.append("files", renamedFile(page.file, page.name)),
       );
-      const token = storedAccessToken();
       const response = await fetch("/api/documents/upload", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       });
       const result = await response.json();

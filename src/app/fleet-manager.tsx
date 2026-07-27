@@ -13,22 +13,6 @@ export type FleetVehicle = {
   assignedAt: string;
 };
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-function authHeaders() {
-  const token = storedAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : undefined;
-}
-
 const headerAliases: Record<keyof Omit<FleetVehicle, "id">, string[]> = {
   brand: ["marka", "brand", "manufacturer", "producent"],
   model: ["model", "vehiclemodel", "modelpojazdu"],
@@ -107,6 +91,7 @@ function formatDate(value: string) {
 export default function FleetManager({ importOpen, onCloseImport }: { importOpen: boolean; onCloseImport: () => void }) {
   const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
   const [vehiclesLoading, setVehiclesLoading] = useState(true);
+  const [vehiclesError, setVehiclesError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [preview, setPreview] = useState<FleetVehicle[]>([]);
   const [fileName, setFileName] = useState("");
@@ -129,11 +114,22 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/fleet/vehicles", { headers: authHeaders() })
-      .then((response) => response.json())
+    fetch("/api/fleet/vehicles")
+      .then(async (response) => {
+        const data = await response.json().catch(() => null);
+        if (!response.ok)
+          throw new Error(data?.error || "Nie udało się pobrać floty.");
+        return data;
+      })
       .then((data) => {
         if (cancelled) return;
-        if (Array.isArray(data.vehicles)) setVehicles(data.vehicles);
+        if (Array.isArray(data?.vehicles)) setVehicles(data.vehicles);
+      })
+      .catch((reason) => {
+        if (!cancelled)
+          setVehiclesError(
+            reason instanceof Error ? reason.message : "Nie udało się pobrać floty.",
+          );
       })
       .finally(() => {
         if (!cancelled) setVehiclesLoading(false);
@@ -167,7 +163,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     try {
       const response = await fetch("/api/fleet/vehicles", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vehicles: preview.map(({ brand, model, registration, customer, assignedAt }) => ({ brand, model, registration, customer, assignedAt })) }),
       });
       const data = await response.json();
@@ -201,7 +197,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     try {
       const response = await fetch("/api/fleet/vehicles", {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...authHeaders() },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ vehicles: [{ brand, model, registration, customer, assignedAt: manualForm.assignedAt }] }),
       });
       const data = await response.json();
@@ -222,7 +218,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     const previous = vehicles;
     setVehicles((current) => current.filter((vehicle) => vehicle.id !== id));
     try {
-      const response = await fetch(`/api/fleet/vehicles/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
+      const response = await fetch(`/api/fleet/vehicles/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!response.ok) {
         const data = await response.json().catch(() => null);
         throw new Error(data?.error || "Nie udało się usunąć pojazdu.");
@@ -251,7 +247,13 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Przekazano od</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td><td><button type="button" className={styles.removeVehicle} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
       <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.activeStatus}>Aktywny</span><button type="button" className={styles.removeVehicle} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
       {vehiclesLoading && vehicles.length === 0 && <div className={styles.empty}>Ładowanie floty…</div>}
-      {!vehiclesLoading && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
+      {!vehiclesLoading && vehiclesError && (
+        <div className={styles.empty}>
+          <CircleAlert size={18} />
+          {vehiclesError}
+        </div>
+      )}
+      {!vehiclesLoading && !vehiclesError && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
     </section>
 
     {manualOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-manual-title"><button className={styles.backdrop} onClick={() => setManualOpen(false)} aria-label="Zamknij" /><section className={styles.modal}>

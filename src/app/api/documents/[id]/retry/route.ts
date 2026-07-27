@@ -29,6 +29,22 @@ export async function POST(
       { status: 503 },
     );
 
+  const checkResponse = await fetch(
+    `${url}/rest/v1/mandate_documents?select=confirmed_at,resolved_at&id=eq.${encodeURIComponent(documentId)}&organization_id=eq.${member.organizationId}`,
+    { headers: adminHeaders(secretKey), cache: "no-store" },
+  );
+  const checkRows = (await checkResponse.json().catch(() => [])) as Array<{
+    confirmed_at: string | null;
+    resolved_at: string | null;
+  }>;
+  if (!checkResponse.ok || !checkRows[0])
+    return NextResponse.json({ error: "Nie znaleziono sprawy." }, { status: 404 });
+  if (checkRows[0].confirmed_at || checkRows[0].resolved_at)
+    return NextResponse.json(
+      { error: "Sprawa jest już zatwierdzona — nie można ponownie uruchomić OCR." },
+      { status: 422 },
+    );
+
   const pagesResponse = await fetch(
     `${url}/rest/v1/mandate_document_pages?select=storage_path,page_number,original_name,mime_type&document_id=eq.${encodeURIComponent(documentId)}&organization_id=eq.${member.organizationId}&order=page_number.asc`,
     {

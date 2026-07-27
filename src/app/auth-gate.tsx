@@ -14,18 +14,6 @@ import {
 } from "lucide-react";
 import styles from "./auth-gate.module.css";
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "guest" | "ready">(
     "loading",
@@ -58,6 +46,26 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       .then((response) => setStatus(response.ok ? "ready" : "guest"))
       .catch(() => setStatus("guest"));
   }, []);
+
+  // The Supabase access token behind ff-access typically expires after ~1h;
+  // without this, every API call starts 401ing mid-session while the UI still
+  // shows the user as logged in. Refresh well before that (every 10 min) using
+  // the longer-lived ff-refresh cookie, and drop to the login screen if that
+  // refresh token itself is no longer valid.
+  useEffect(() => {
+    if (status !== "ready") return;
+    const interval = window.setInterval(
+      () => {
+        fetch("/api/auth", { method: "PUT" })
+          .then((response) => {
+            if (!response.ok) setStatus("guest");
+          })
+          .catch(() => {});
+      },
+      10 * 60 * 1000,
+    );
+    return () => window.clearInterval(interval);
+  }, [status]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -107,14 +115,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setBugStatus("sending");
     setBugError(null);
     try {
-      const token = storedAccessToken();
       const form = new FormData();
       form.set("description", description);
       form.set("context", document.title);
       if (bugAttachment) form.set("attachment", bugAttachment);
       const response = await fetch("/api/bug-reports", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       });
       const data = await response.json().catch(() => ({}));

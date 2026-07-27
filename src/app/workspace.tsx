@@ -66,6 +66,7 @@ type CaseItem = {
   responsibleEmail?: string;
   confirmedAt?: string | null;
   resolvedAt?: string | null;
+  caseNumber?: string | null;
 };
 
 // Statuses the background OCR job can still move on from by itself —
@@ -223,6 +224,7 @@ export default function MandatyWorkspace() {
   const [saved, setSaved] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [matching, setMatching] = useState(false);
   const [matchMessage, setMatchMessage] = useState<string | null>(null);
@@ -358,7 +360,15 @@ export default function MandatyWorkspace() {
 
   async function loadDocuments(preserveSelection: boolean) {
     const response = await fetch("/api/documents", { cache: "no-store" });
-    if (!response.ok) return null;
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      setDocumentsError(
+        data?.error ||
+          "Nie udało się pobrać dokumentów — wyświetlane dane mogą być nieaktualne.",
+      );
+      return null;
+    }
+    setDocumentsError(null);
     const result = (await response.json()) as {
       documents?: Array<{
         id: string;
@@ -413,6 +423,7 @@ export default function MandatyWorkspace() {
       responsibleEmail: document.responsible_email,
       confirmedAt: document.confirmed_at,
       resolvedAt: document.resolved_at,
+      caseNumber: document.case_number,
     }));
     const justFinished = mapped.find((item) => {
       const prior = caseItems.find((existing) => existing.id === item.id);
@@ -591,6 +602,7 @@ export default function MandatyWorkspace() {
         body: JSON.stringify({
           registrationNumber: draft.plate,
           eventAt: draft.eventAt,
+          caseNumber: selected.caseNumber,
           sender: draft.sender,
           responsibleName: draft.responsibleName,
           responsibleTaxId: draft.responsibleTaxId,
@@ -681,18 +693,8 @@ export default function MandatyWorkspace() {
       uploadedPages.forEach((page) =>
         form.append("files", renamedFile(page.file, page.name)),
       );
-      let token: string | null = null;
-      for (let index = 0; index < localStorage.length; index++) {
-        const key = localStorage.key(index);
-        if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-        try {
-          const session = JSON.parse(localStorage.getItem(key) || "null");
-          if (session?.access_token) token = String(session.access_token);
-        } catch {}
-      }
       const response = await fetch("/api/documents/upload", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       });
       const result = await response.json();
@@ -930,6 +932,13 @@ export default function MandatyWorkspace() {
             )}
           </div>
         </header>
+
+        {documentsError &&
+          (activeView === "cases" || activeView === "documents") && (
+            <p className={styles.uploadError} role="alert">
+              {documentsError}
+            </p>
+          )}
 
         {activeView === "fleet" ? (
           <FleetManager
@@ -1288,6 +1297,7 @@ export default function MandatyWorkspace() {
                           className={styles.textButton}
                           disabled={
                             retrying ||
+                            Boolean(selected.confirmedAt) ||
                             (selected.ocrStatus
                               ? pendingOcrStatuses.has(selected.ocrStatus)
                               : false)

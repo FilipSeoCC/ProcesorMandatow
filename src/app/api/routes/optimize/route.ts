@@ -49,11 +49,12 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Nieprawidłowy JSON." }, { status: 400 }); }
   if (!valid(body)) return NextResponse.json({ error: "Podaj od 2 do 20 poprawnych punktów dostawy." }, { status: 422 });
 
+  const member = await verifyMember(request, ["admin", "dispatcher", "office", "scanner"]);
+  if (!member) return NextResponse.json({ error: "Zaloguj się, aby ułożyć trasę." }, { status: 401 });
+
   const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
   if (!apiKey || !projectId) return NextResponse.json(demo(body));
-  const member = await verifyMember(request, ["admin", "dispatcher", "office", "scanner"]);
-  if (!member) return NextResponse.json({ error: "Zaloguj się, aby ułożyć trasę." }, { status: 401 });
 
   const now = new Date();
   const googleRequest = { model: { globalStartTime: now.toISOString(), globalEndTime: new Date(now.getTime() + 16 * 60 * 60 * 1000).toISOString(), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s` }] })), vehicles: [{ label: "Wadim", startLocation: body.depot, ...(body.returnToDepot === false ? {} : { endLocation: body.depot }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
