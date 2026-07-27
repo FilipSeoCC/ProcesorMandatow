@@ -106,10 +106,12 @@ begin
   if auth.uid() is null then raise exception 'Not authenticated'; end if;
   if exists(select 1 from public.organization_members where user_id=auth.uid()) then raise exception 'User already belongs to an organization'; end if;
   -- Single-tenant deployment: once an organization exists, every new signup
-  -- joins it (view-only) instead of bootstrapping its own isolated org.
+  -- joins it with full working access instead of bootstrapping its own
+  -- isolated org. 'office' can process documents/fleet/routes but not manage
+  -- org members, unlike 'admin'.
   select id into existing_id from public.organizations order by created_at asc limit 1;
   if existing_id is not null then
-    insert into public.organization_members(organization_id,user_id,role) values(existing_id,auth.uid(),'viewer');
+    insert into public.organization_members(organization_id,user_id,role) values(existing_id,auth.uid(),'office');
     return existing_id;
   end if;
   insert into public.organizations(name,owner_id) values(coalesce(nullif(trim(company_name),''),'Moja firma'),auth.uid()) returning id into created_id;

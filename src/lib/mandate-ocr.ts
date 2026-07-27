@@ -78,9 +78,13 @@ function dateNear(text: string, labels: RegExp) {
 
 export function extractMandateFields(rawText: string): ExtractedFields {
   const text = rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ");
-  const plateContext = text.match(
+  const plateContextMatch = text.match(
     /(?:nr|numer)[\s\S]{0,35}rejestracyj(?:ny|nego|nym)[\s\S]{0,60}?\b([A-Z]{1,6}[ -]?[A-Z0-9]{2,6})\b/i,
   );
+  // A real plate always has a digit — a label match without one is a false
+  // positive (e.g. the regex latching onto a nearby word), so fall through.
+  const plateContext =
+    plateContextMatch && /\d/.test(plateContextMatch[1]) ? plateContextMatch : null;
   const plateFallback =
     text
       .match(/\b[A-Z]{1,6}[ -]?[A-Z0-9]{2,6}\b/g)

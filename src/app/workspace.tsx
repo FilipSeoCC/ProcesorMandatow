@@ -86,10 +86,6 @@ function renamedFile(file: File, displayName: string) {
     lastModified: file.lastModified,
   });
 }
-const retryableOcrStatuses = new Set([
-  "ocr_configuration_required",
-  "ocr_failed",
-]);
 
 const demoCases: CaseItem[] = [
   {
@@ -138,6 +134,34 @@ const demoCases: CaseItem[] = [
   },
 ];
 
+const displayNameOverrides: Record<string, string> = {
+  "fkedziorawenet@gmail.com": "Filip Kędziora",
+  "fkedziora@wenet.pl": "user Kędziora",
+};
+
+function accountDisplayName(account: {
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+} | null) {
+  if (!account) return "Konto użytkownika";
+  const override = account.email
+    ? displayNameOverrides[account.email.toLowerCase()]
+    : undefined;
+  if (override) return override;
+  const full = `${account.firstName ?? ""} ${account.lastName ?? ""}`.trim();
+  return full || account.email || "Konto użytkownika";
+}
+
+function accountInitials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  const initials = parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+  return initials || "?";
+}
+
 const statusClass: Record<CaseStatus, string> = {
   "Do weryfikacji": styles.statusReview,
   Dopasowano: styles.statusMatched,
@@ -159,6 +183,8 @@ export default function MandatyWorkspace() {
     email: string | null;
     role: string | null;
     userId: string | null;
+    firstName: string | null;
+    lastName: string | null;
   } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [passwordStatus, setPasswordStatus] = useState<
@@ -368,6 +394,8 @@ export default function MandatyWorkspace() {
             email: data.email ?? null,
             role: data.role ?? null,
             userId: data.userId ?? null,
+            firstName: data.firstName ?? null,
+            lastName: data.lastName ?? null,
           });
       })
       .catch(() => null);
@@ -751,9 +779,11 @@ export default function MandatyWorkspace() {
               className={styles.profileButton}
               onClick={() => setAccountMenuOpen((current) => !current)}
             >
-              <span className={styles.avatar}>AK</span>
+              <span className={styles.avatar}>
+                {accountInitials(accountDisplayName(account))}
+              </span>
               <span>
-                <strong>Konto użytkownika</strong>
+                <strong>{accountDisplayName(account)}</strong>
                 <small>{account?.email || "Kliknij, aby zobaczyć opcje"}</small>
               </span>
               <MoreHorizontal size={18} />
@@ -1064,39 +1094,48 @@ export default function MandatyWorkspace() {
                 <div className={styles.reviewGrid}>
                   <DocumentPreview src={selected.previewUrl} />
                   <div className={styles.dataPane}>
+                  <div className={styles.dataPaneScroll}>
                     <div className={styles.analysisBanner}>
                       <span>
                         <CheckCircle2 size={18} />
                         <strong>
-                          {selected.ocrStatus === "ready"
+                          {!selected.ocrStatus
                             ? "Analiza zakończona"
-                            : selected.ocrStatus === "ocr_failed" ||
-                                selected.ocrStatus ===
-                                  "ocr_configuration_required"
-                              ? "Analiza wymaga ponowienia"
-                              : selected.ocrStatus
-                                ? "Analiza w toku"
-                                : "Analiza zakończona"}
+                            : pendingOcrStatuses.has(selected.ocrStatus)
+                              ? "Analiza w toku"
+                              : selected.ocrStatus === "ready"
+                                ? "Analiza zakończona"
+                                : selected.ocrStatus === "needs_review"
+                                  ? "Wymaga weryfikacji"
+                                  : "Analiza nie powiodła się"}
                         </strong>
                       </span>
                       <small>
-                        {selected.ocrStatus === "ready"
-                          ? "Dane OCR gotowe do weryfikacji"
-                          : selected.ocrStatus
-                            ? selected.ocrStatus.replaceAll("_", " ")
-                            : "Rozpoznano 8 z 9 pól"}
+                        {!selected.ocrStatus
+                          ? "Rozpoznano 8 z 9 pól"
+                          : pendingOcrStatuses.has(selected.ocrStatus)
+                            ? "Trwa rozpoznawanie dokumentu…"
+                            : selected.ocrStatus === "ready"
+                              ? "Dane OCR gotowe do weryfikacji"
+                              : selected.ocrStatus === "needs_review"
+                                ? "Część danych nie została rozpoznana — uzupełnij ręcznie poniżej"
+                                : "Nie udało się odczytać dokumentu"}
                       </small>
-                      {selected.ocrStatus &&
-                        retryableOcrStatuses.has(selected.ocrStatus) && (
-                          <button
-                            type="button"
-                            className={styles.textButton}
-                            disabled={retrying}
-                            onClick={retryOcr}
-                          >
-                            {retrying ? "Ponawiam…" : "Ponów analizę OCR"}
-                          </button>
-                        )}
+                      {selected.documentId && (
+                        <button
+                          type="button"
+                          className={styles.textButton}
+                          disabled={
+                            retrying ||
+                            (selected.ocrStatus
+                              ? pendingOcrStatuses.has(selected.ocrStatus)
+                              : false)
+                          }
+                          onClick={retryOcr}
+                        >
+                          {retrying ? "Ponawiam…" : "Uruchom OCR ponownie"}
+                        </button>
+                      )}
                     </div>
                     <section className={styles.formSection}>
                       <div className={styles.sectionHeading}>
@@ -1222,6 +1261,7 @@ export default function MandatyWorkspace() {
                     {saveError && (
                       <p className={styles.uploadError}>{saveError}</p>
                     )}
+                  </div>
                     <div className={styles.formFooter}>
                       <span>
                         {selected.resolvedAt
@@ -1399,6 +1439,10 @@ export default function MandatyWorkspace() {
                 <X size={21} />
               </button>
             </header>
+            <div className={styles.settingsField}>
+              <small>Imię i nazwisko</small>
+              <strong>{accountDisplayName(account)}</strong>
+            </div>
             <div className={styles.settingsField}>
               <small>Adres e-mail</small>
               <strong>{account?.email || "—"}</strong>

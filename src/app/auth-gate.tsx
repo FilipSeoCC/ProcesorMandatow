@@ -224,13 +224,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           <span>
             <LockKeyhole size={20} />
           </span>
-          <h1>
-            {mode === "sign-in" ? "Zaloguj się" : "Utwórz konto administratora"}
-          </h1>
+          <h1>{mode === "sign-in" ? "Zaloguj się" : "Utwórz konto"}</h1>
           <p>
             {mode === "sign-in"
               ? "Uzyskaj dostęp do dokumentów, floty i tras dostaw."
-              : "Pierwsze konto zakłada organizację i zostaje administratorem. Kolejne konta dołączają automatycznie z dostępem do odczytu."}
+              : "Utwórz konto, aby uzyskać dostęp do dokumentów, floty i tras dostaw."}
           </p>
         </div>
         <form onSubmit={submit}>
