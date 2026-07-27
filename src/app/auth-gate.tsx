@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Bug,
   CheckCircle2,
@@ -44,6 +45,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [bugAttachmentPreview, setBugAttachmentPreview] = useState<
     string | null
   >(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- gate for a document.body portal target that only exists client-side
+    setMounted(true);
+  }, []);
 
   function setBugAttachmentFile(file: File | null) {
     setBugAttachmentPreview((current) => {
@@ -156,31 +163,34 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   if (status === "ready")
     return (
       <>
-        <button
-          className={styles.mobileLogout}
-          onClick={signOut}
-          aria-label="Wyloguj"
-        >
-          <LogOut size={18} />
-        </button>
-        <button
-          type="button"
-          className={styles.reportBugButton}
-          onClick={() => {
-            setBugOpen(true);
-            setBugStatus("idle");
-            setBugError(null);
-          }}
-          aria-label="Zgłoś błąd"
-        >
-          <Bug size={16} />
-          <span className={styles.bugLabel}>Zgłoś błąd</span>
-        </button>
-        {bugOpen && (
-          <div
-            className={styles.bugModalLayer}
-            role="dialog"
-            aria-modal="true"
+        {mounted &&
+          createPortal(
+            <>
+              <button
+                className={styles.mobileLogout}
+                onClick={signOut}
+                aria-label="Wyloguj"
+              >
+                <LogOut size={18} />
+              </button>
+              <button
+                type="button"
+                className={styles.reportBugButton}
+                onClick={() => {
+                  setBugOpen(true);
+                  setBugStatus("idle");
+                  setBugError(null);
+                }}
+                aria-label="Zgłoś błąd"
+              >
+                <Bug size={16} />
+                <span className={styles.bugLabel}>Zgłoś błąd</span>
+              </button>
+              {bugOpen && (
+                <div
+                  className={styles.bugModalLayer}
+                  role="dialog"
+                  aria-modal="true"
             aria-labelledby="bug-report-title"
           >
             <button
@@ -270,7 +280,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               )}
             </div>
           </div>
-        )}
+              )}
+            </>,
+            document.body,
+          )}
         {children}
       </>
     );

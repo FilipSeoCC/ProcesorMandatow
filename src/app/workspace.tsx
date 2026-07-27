@@ -32,6 +32,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import DeliveryPlanner from "./delivery-planner";
 import Employees from "./employees";
 import FleetManager from "./fleet-manager";
@@ -233,6 +234,7 @@ export default function MandatyWorkspace() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [team, setTeam] = useState<
     Array<{ userId: string; role: string; email: string | null; name: string | null }>
   >([]);
@@ -263,6 +265,11 @@ export default function MandatyWorkspace() {
 
   const selected =
     caseItems.find((item) => item.id === selectedId) ?? caseItems[0];
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- gate for a document.body portal target that only exists client-side
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the edit form when the selected case changes, not a derived-render value
@@ -1643,17 +1650,23 @@ export default function MandatyWorkspace() {
         </button>
       )}
 
-      <button
-        type="button"
-        className={styles.desktopModeToggle}
-        onClick={() => setDesktopMode((current) => !current)}
-        aria-label={
-          desktopMode ? "Przełącz na widok mobilny" : "Przełącz na widok desktopowy"
-        }
-        title={desktopMode ? "Widok mobilny" : "Widok desktopowy"}
-      >
-        {desktopMode ? <Smartphone size={17} /> : <Monitor size={17} />}
-      </button>
+      {mounted &&
+        createPortal(
+          <button
+            type="button"
+            className={styles.desktopModeToggle}
+            onClick={() => setDesktopMode((current) => !current)}
+            aria-label={
+              desktopMode
+                ? "Przełącz na widok mobilny"
+                : "Przełącz na widok desktopowy"
+            }
+            title={desktopMode ? "Widok mobilny" : "Widok desktopowy"}
+          >
+            {desktopMode ? <Smartphone size={17} /> : <Monitor size={17} />}
+          </button>,
+          document.body,
+        )}
 
       {toast && (
         <div
