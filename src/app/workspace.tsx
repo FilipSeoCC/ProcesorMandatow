@@ -230,6 +230,9 @@ export default function MandatyWorkspace() {
   const [resolving, setResolving] = useState(false);
   const [caseMenuOpen, setCaseMenuOpen] = useState(false);
   const [deletingCase, setDeletingCase] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
+  const [bulkWorking, setBulkWorking] = useState(false);
   const [team, setTeam] = useState<
     Array<{ userId: string; role: string; email: string | null; name: string | null }>
   >([]);
@@ -700,6 +703,68 @@ export default function MandatyWorkspace() {
       }
     } finally {
       setDeletingCase(false);
+    }
+  }
+
+  function toggleCaseSelection(documentId?: string | null) {
+    if (!documentId) return;
+    setSelectedCaseIds((current) => {
+      const next = new Set(current);
+      if (next.has(documentId)) next.delete(documentId);
+      else next.add(documentId);
+      return next;
+    });
+  }
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedCaseIds(new Set());
+  }
+
+  async function bulkDeleteCases() {
+    if (selectedCaseIds.size === 0 || bulkWorking) return;
+    if (
+      !window.confirm(
+        `Usunąć ${selectedCaseIds.size} zaznaczonych spraw? Tej operacji nie można cofnąć.`,
+      )
+    )
+      return;
+    setBulkWorking(true);
+    try {
+      await Promise.all(
+        [...selectedCaseIds].map((documentId) =>
+          fetch(`/api/documents/${documentId}`, { method: "DELETE" }),
+        ),
+      );
+      exitSelectMode();
+      await loadDocuments(false);
+    } finally {
+      setBulkWorking(false);
+    }
+  }
+
+  async function bulkResolveCases() {
+    if (selectedCaseIds.size === 0 || bulkWorking) return;
+    setBulkWorking(true);
+    try {
+      const results = await Promise.all(
+        [...selectedCaseIds].map((documentId) =>
+          fetch(`/api/documents/${documentId}/resolve`, { method: "POST" }).then(
+            (response) => response.ok,
+          ),
+        ),
+      );
+      const failed = results.filter((ok) => !ok).length;
+      exitSelectMode();
+      await loadDocuments(false);
+      if (failed > 0)
+        setToast({
+          id: Date.now(),
+          success: false,
+          message: `${failed} spraw nie udało się oznaczyć — najpierw wymagane zatwierdzenie danych.`,
+        });
+    } finally {
+      setBulkWorking(false);
     }
   }
 
@@ -1188,10 +1253,14 @@ export default function MandatyWorkspace() {
                     </p>
                   </div>
                   <button
-                    className={styles.moreButton}
-                    aria-label="Więcej opcji"
+                    type="button"
+                    className={styles.textButton}
+                    onClick={() => {
+                      if (selectMode) exitSelectMode();
+                      else setSelectMode(true);
+                    }}
                   >
-                    <MoreHorizontal size={20} />
+                    {selectMode ? "Anuluj" : "Zaznacz"}
                   </button>
                 </div>
                 <div className={styles.filters}>
@@ -1225,12 +1294,29 @@ export default function MandatyWorkspace() {
                   {filtered.map((item) => (
                     <button
                       key={item.id}
-                      className={`${styles.caseItem} ${selectedId === item.id ? styles.caseSelected : ""}`}
+                      className={`${styles.caseItem} ${selectedId === item.id ? styles.caseSelected : ""} ${selectMode ? styles.caseItemSelectable : ""}`}
                       onClick={() => {
+                        if (selectMode) {
+                          toggleCaseSelection(item.documentId);
+                          return;
+                        }
                         setSelectedId(item.id);
                         setMobileDetailOpen(true);
                       }}
                     >
+                      {selectMode && (
+                        <span
+                          className={`${styles.caseCheckbox} ${
+                            item.documentId && selectedCaseIds.has(item.documentId)
+                              ? styles.caseCheckboxOn
+                              : ""
+                          }`}
+                        >
+                          {item.documentId && selectedCaseIds.has(item.documentId) && (
+                            <Check size={13} />
+                          )}
+                        </span>
+                      )}
                       <span className={styles.caseItemTop}>
                         <strong className={styles.plate}>{item.plate}</strong>
                         <span
@@ -1254,6 +1340,30 @@ export default function MandatyWorkspace() {
                     </div>
                   )}
                 </div>
+                {selectMode && selectedCaseIds.size > 0 && (
+                  <div className={styles.bulkBar}>
+                    <span>{selectedCaseIds.size} zaznaczonych</span>
+                    <div>
+                      <button
+                        type="button"
+                        className={styles.secondaryButton}
+                        disabled={bulkWorking}
+                        onClick={bulkResolveCases}
+                      >
+                        {bulkWorking ? "Pracuję…" : "Oznacz jako zrealizowane"}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.bulkDeleteButton}
+                        disabled={bulkWorking}
+                        onClick={bulkDeleteCases}
+                      >
+                        <Trash2 size={15} />
+                        Usuń
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div

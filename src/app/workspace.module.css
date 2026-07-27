@@ -689,6 +689,66 @@
   background: #f0f5ff !important;
   box-shadow: inset 3px 0 var(--blue);
 }
+.caseItemSelectable {
+  position: relative;
+  padding-right: 46px;
+}
+.caseCheckbox {
+  position: absolute;
+  top: 15px;
+  right: 14px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #c7d2e0;
+  background: #fff;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.caseCheckboxOn {
+  background: var(--blue);
+  border-color: var(--blue);
+}
+.bulkBar {
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+  border-top: 1px solid var(--line);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #40516a;
+}
+.bulkBar > div {
+  display: flex;
+  gap: 8px;
+}
+.bulkDeleteButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #fff5f5;
+  border: 1px solid #f0d3d3;
+  color: #c0392b;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.bulkDeleteButton:hover {
+  background: #ffeaea;
+}
+.bulkDeleteButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .caseItemTop,
 .caseMeta {
   display: flex;
