@@ -5,6 +5,7 @@ import {
   Bug,
   CheckCircle2,
   FileText,
+  ImagePlus,
   LoaderCircle,
   LockKeyhole,
   LogOut,
@@ -39,6 +40,18 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     "idle" | "sending" | "sent" | "error"
   >("idle");
   const [bugError, setBugError] = useState<string | null>(null);
+  const [bugAttachment, setBugAttachment] = useState<File | null>(null);
+  const [bugAttachmentPreview, setBugAttachmentPreview] = useState<
+    string | null
+  >(null);
+
+  function setBugAttachmentFile(file: File | null) {
+    setBugAttachmentPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return file ? URL.createObjectURL(file) : null;
+    });
+    setBugAttachment(file);
+  }
 
   useEffect(() => {
     fetch("/api/auth", { cache: "no-store" })
@@ -95,19 +108,21 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setBugError(null);
     try {
       const token = storedAccessToken();
+      const form = new FormData();
+      form.set("description", description);
+      form.set("context", document.title);
+      if (bugAttachment) form.set("attachment", bugAttachment);
       const response = await fetch("/api/bug-reports", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ description, context: document.title }),
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok)
         throw new Error(data.error || "Nie udało się wysłać zgłoszenia.");
       setBugStatus("sent");
       setBugDescription("");
+      setBugAttachmentFile(null);
       window.setTimeout(() => {
         setBugOpen(false);
         setBugStatus("idle");
@@ -118,6 +133,17 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         reason instanceof Error ? reason.message : "Nie udało się wysłać zgłoszenia.",
       );
     }
+  }
+
+  function pickBugAttachment(candidate: File | null) {
+    if (!candidate) return;
+    if (!candidate.type.startsWith("image/")) return;
+    if (candidate.size > 8 * 1024 * 1024) {
+      setBugStatus("error");
+      setBugError("Zrzut ekranu przekracza limit 8 MB.");
+      return;
+    }
+    setBugAttachmentFile(candidate);
   }
 
   if (status === "loading")
@@ -146,9 +172,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
             setBugError(null);
           }}
           aria-label="Zgłoś błąd"
-          title="Zgłoś błąd"
         >
-          <Bug size={18} />
+          <Bug size={16} />
+          <span className={styles.bugLabel}>Zgłoś błąd</span>
         </button>
         {bugOpen && (
           <div
@@ -159,13 +185,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           >
             <button
               className={styles.bugModalBackdrop}
-              onClick={() => setBugOpen(false)}
+              onClick={() => {
+                setBugOpen(false);
+                setBugAttachmentFile(null);
+              }}
               aria-label="Zamknij"
             />
             <div className={styles.bugModal}>
               <header>
                 <h2 id="bug-report-title">Zgłoś błąd</h2>
-                <button onClick={() => setBugOpen(false)} aria-label="Zamknij">
+                <button
+                  onClick={() => {
+                    setBugOpen(false);
+                    setBugAttachmentFile(null);
+                  }}
+                  aria-label="Zamknij"
+                >
                   <X size={19} />
                 </button>
               </header>
@@ -181,10 +216,43 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
                     <textarea
                       value={bugDescription}
                       onChange={(event) => setBugDescription(event.target.value)}
+                      onPaste={(event) => {
+                        const item = Array.from(
+                          event.clipboardData.items,
+                        ).find((entry) => entry.type.startsWith("image/"));
+                        const file = item?.getAsFile();
+                        if (file) pickBugAttachment(file);
+                      }}
                       rows={5}
-                      placeholder="Opisz problem — co robiłeś, co się stało, czego się spodziewałeś."
+                      placeholder="Opisz problem — co robiłeś, co się stało, czego się spodziewałeś. Możesz wkleić zrzut ekranu (Ctrl+V)."
                     />
                   </label>
+                  <div className={styles.bugAttachRow}>
+                    <label className={styles.bugAttachButton}>
+                      <ImagePlus size={15} />
+                      {bugAttachment ? "Zmień zrzut ekranu" : "Dodaj zrzut ekranu lub plik"}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={(event) =>
+                          pickBugAttachment(event.target.files?.[0] ?? null)
+                        }
+                      />
+                    </label>
+                    {bugAttachmentPreview && (
+                      <div className={styles.bugAttachPreview}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={bugAttachmentPreview} alt="Podgląd załącznika" />
+                        <button
+                          type="button"
+                          onClick={() => setBugAttachmentFile(null)}
+                          aria-label="Usuń załącznik"
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   {bugStatus === "error" && bugError && (
                     <p className={styles.bugError} role="alert">
                       {bugError}

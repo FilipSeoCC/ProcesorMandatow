@@ -182,13 +182,16 @@
 .reportBugButton {
   position: fixed;
   z-index: 45;
-  left: 14px;
-  bottom: 14px;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
+  right: 14px;
+  top: 14px;
+  height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
   color: #fff;
   background: #172033;
   box-shadow: 0 10px 24px #0f172a4d;
@@ -244,6 +247,55 @@
   font-size: 12px;
   color: #1c2534;
   resize: vertical;
+}
+.bugAttachRow {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.bugAttachButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #dce3ec;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #40516a;
+  cursor: pointer;
+}
+.bugAttachButton input {
+  display: none;
+}
+.bugAttachPreview {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #dce3ec;
+}
+.bugAttachPreview img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.bugAttachPreview button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: #101827c9;
+  color: #fff;
+  display: grid;
+  place-items: center;
 }
 .bugError {
   margin-top: 8px;
@@ -303,10 +355,18 @@
     -webkit-transform: translateZ(0);
     will-change: transform;
   }
-}
-@media (max-width: 760px) {
   .reportBugButton {
-    bottom: calc(80px + env(safe-area-inset-bottom));
+    left: 14px;
+    right: auto;
+    top: max(11px, env(safe-area-inset-top));
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 12px;
+  }
+  .bugLabel {
+    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

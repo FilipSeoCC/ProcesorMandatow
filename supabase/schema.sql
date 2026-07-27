@@ -169,6 +169,8 @@ create table if not exists public.bug_reports (
   description text not null, context text not null default '', status public.bug_report_status not null default 'nowe',
   created_at timestamptz not null default now(), updated_at timestamptz not null default now()
 );
+alter table public.bug_reports add column if not exists attachment_path text not null default '';
+alter table public.bug_reports add column if not exists attachment_mime_type text not null default '';
 alter table public.bug_reports enable row level security;
 drop policy if exists bug_reports_read on public.bug_reports; drop policy if exists bug_reports_insert on public.bug_reports; drop policy if exists bug_reports_update on public.bug_reports;
 create policy bug_reports_read on public.bug_reports for select using(public.has_org_role(organization_id,array['admin']::public.app_role[]));
@@ -177,4 +179,8 @@ create policy bug_reports_update on public.bug_reports for update using(public.h
 
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('mandate-documents','mandate-documents',false,15728640,array['application/pdf','image/jpeg','image/png','image/tiff','image/heic','image/heif'])
+on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
+
+insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
+values('bug-reports','bug-reports',false,8388608,array['image/png','image/jpeg','image/webp','image/gif'])
 on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;

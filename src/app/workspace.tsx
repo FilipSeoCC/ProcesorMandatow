@@ -2,6 +2,7 @@
 
 import {
   Bell,
+  Bug,
   Camera,
   Check,
   CheckCircle2,
@@ -170,9 +171,21 @@ const statusClass: Record<CaseStatus, string> = {
   Zrealizowana: styles.statusResolved,
 };
 
+const bugStatusLabel: Record<"nowe" | "w_trakcie" | "rozwiazane", string> = {
+  nowe: "Nowe",
+  w_trakcie: "W trakcie",
+  rozwiazane: "Rozwiązane",
+};
+
+const bugStatusClass: Record<"nowe" | "w_trakcie" | "rozwiazane", string> = {
+  nowe: styles.statusReview,
+  w_trakcie: styles.statusNew,
+  rozwiazane: styles.statusMatched,
+};
+
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<
-    "cases" | "fleet" | "documents" | "routes" | "employees"
+    "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [desktopMode, setDesktopMode] = useState(false);
@@ -219,6 +232,19 @@ export default function MandatyWorkspace() {
   const [docEmployeeFilter, setDocEmployeeFilter] = useState("Wszyscy");
   const [docDateFrom, setDocDateFrom] = useState("");
   const [docDateTo, setDocDateTo] = useState("");
+  const [bugReports, setBugReports] = useState<
+    Array<{
+      id: string;
+      description: string;
+      context: string;
+      reporter_email: string;
+      status: "nowe" | "w_trakcie" | "rozwiazane";
+      created_at: string;
+      attachmentUrl: string | null;
+    }>
+  >([]);
+  const [bugReportsLoading, setBugReportsLoading] = useState(false);
+  const [bugUpdating, setBugUpdating] = useState<string | null>(null);
   const [draft, setDraft] = useState({
     plate: "",
     eventAt: "",
@@ -280,6 +306,40 @@ export default function MandatyWorkspace() {
     const member = team.find((entry) => entry.userId === userId);
     return member?.name || member?.email || "Nieznany";
   }
+
+  async function loadBugReports() {
+    setBugReportsLoading(true);
+    try {
+      const response = await fetch("/api/bug-reports", { cache: "no-store" });
+      if (!response.ok) return;
+      const data = await response.json();
+      setBugReports(data.reports ?? []);
+    } finally {
+      setBugReportsLoading(false);
+    }
+  }
+
+  async function updateBugStatus(
+    id: string,
+    status: "nowe" | "w_trakcie" | "rozwiazane",
+  ) {
+    setBugUpdating(id);
+    try {
+      const response = await fetch(`/api/bug-reports/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (response.ok) await loadBugReports();
+    } finally {
+      setBugUpdating(null);
+    }
+  }
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-role-known pattern
+    if (account?.role === "admin") loadBugReports().catch(() => null);
+  }, [account?.role]);
 
   const docFiltered = useMemo(
     () =>
@@ -739,6 +799,24 @@ export default function MandatyWorkspace() {
             <UserRound size={19} />
             Pracownicy
           </button>
+          {account?.role === "admin" && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView("bugs");
+                setMobileMenu(false);
+              }}
+              className={`${styles.navItem} ${activeView === "bugs" ? styles.navActive : ""}`}
+            >
+              <Bug size={19} />
+              Błędy
+              {bugReports.filter((report) => report.status !== "rozwiazane").length > 0 && (
+                <span className={styles.navCount}>
+                  {bugReports.filter((report) => report.status !== "rozwiazane").length}
+                </span>
+              )}
+            </button>
+          )}
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.securityNote}>
@@ -812,7 +890,9 @@ export default function MandatyWorkspace() {
                     ? "Planer tras"
                     : activeView === "employees"
                       ? "Pracownicy"
-                      : "Zarządzanie flotą"}
+                      : activeView === "bugs"
+                        ? "Zgłoszenia błędów"
+                        : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
@@ -836,7 +916,9 @@ export default function MandatyWorkspace() {
                 <Upload size={18} />
                 Importuj flotę
               </button>
-            ) : activeView === "routes" || activeView === "employees" ? null : (
+            ) : activeView === "routes" ||
+              activeView === "employees" ||
+              activeView === "bugs" ? null : (
               <button
                 className={styles.primaryButton}
                 onClick={() => setScanOpen(true)}
@@ -857,6 +939,79 @@ export default function MandatyWorkspace() {
           <Employees />
         ) : activeView === "routes" ? (
           <DeliveryPlanner />
+        ) : activeView === "bugs" ? (
+          <section className={styles.bugList} aria-label="Zgłoszenia błędów">
+            {bugReportsLoading && bugReports.length === 0 ? (
+              <div className={styles.emptyState}>
+                <Bug size={24} />
+                <strong>Ładowanie…</strong>
+              </div>
+            ) : bugReports.length === 0 ? (
+              <div className={styles.emptyState}>
+                <Bug size={24} />
+                <strong>Brak zgłoszeń</strong>
+                <span>Zgłoszenia błędów od zespołu pojawią się tutaj.</span>
+              </div>
+            ) : (
+              bugReports.map((report) => (
+                <article key={report.id} className={styles.bugCard}>
+                  <div className={styles.bugCardHeader}>
+                    <span
+                      className={`${styles.status} ${bugStatusClass[report.status]}`}
+                    >
+                      {bugStatusLabel[report.status]}
+                    </span>
+                    <span className={styles.caseMeta}>
+                      <span>{report.reporter_email}</span>
+                      <span>
+                        {new Date(report.created_at).toLocaleString("pl-PL", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </span>
+                    </span>
+                  </div>
+                  <p className={styles.bugDescription}>{report.description}</p>
+                  {report.context && (
+                    <p className={styles.bugContext}>Kontekst: {report.context}</p>
+                  )}
+                  {report.attachmentUrl && (
+                    <a
+                      href={report.attachmentUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={styles.bugAttachment}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={report.attachmentUrl} alt="Załączony zrzut ekranu" />
+                    </a>
+                  )}
+                  <div className={styles.bugCardFooter}>
+                    <label className={styles.selectBox}>
+                      <span className={styles.srOnly}>Status zgłoszenia</span>
+                      <select
+                        value={report.status}
+                        disabled={bugUpdating === report.id}
+                        onChange={(event) =>
+                          updateBugStatus(
+                            report.id,
+                            event.target.value as "nowe" | "w_trakcie" | "rozwiazane",
+                          )
+                        }
+                      >
+                        <option value="nowe">Nowe</option>
+                        <option value="w_trakcie">W trakcie</option>
+                        <option value="rozwiazane">Rozwiązane</option>
+                      </select>
+                      <ChevronDown size={16} />
+                    </label>
+                  </div>
+                </article>
+              ))
+            )}
+          </section>
         ) : activeView === "documents" ? (
           <>
             <div className={styles.docFilters}>
@@ -1308,7 +1463,9 @@ export default function MandatyWorkspace() {
           <Upload size={21} />
           Importuj flotę
         </button>
-      ) : activeView === "routes" || activeView === "employees" ? null : (
+      ) : activeView === "routes" ||
+        activeView === "employees" ||
+        activeView === "bugs" ? null : (
         <button
           className={styles.mobileScanButton}
           onClick={() => setScanOpen(true)}
