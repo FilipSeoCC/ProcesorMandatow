@@ -1,7 +1,7 @@
 "use client";
 
 import { CarFront, CheckCircle2, CircleAlert, Download, FileSpreadsheet, Plus, Search, Trash2, Upload, X } from "lucide-react";
-import { ChangeEvent, useMemo, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import styles from "./fleet-manager.module.css";
 
 export type FleetVehicle = {
@@ -13,13 +13,21 @@ export type FleetVehicle = {
   assignedAt: string;
 };
 
-const initialVehicles: FleetVehicle[] = [
-  { id: "1", brand: "Ford", model: "Transit Custom", registration: "WI 2847K", customer: "Nova Bud Sp. z o.o.", assignedAt: "2026-06-10T08:00" },
-  { id: "2", brand: "Mercedes-Benz", model: "Sprinter 317", registration: "WW 91R2", customer: "Marcin Wiśniewski", assignedAt: "2026-05-22T12:30" },
-  { id: "3", brand: "Renault", model: "Master", registration: "WX 5520M", customer: "Flota wewnętrzna", assignedAt: "2026-07-18T09:00" },
-  { id: "4", brand: "Volkswagen", model: "Crafter", registration: "WPR 77A9", customer: "Verto Group Sp. z o.o.", assignedAt: "2026-04-03T15:45" },
-  { id: "5", brand: "Fiat", model: "Ducato", registration: "WA 4821P", customer: "Alto Serwis Sp. z o.o.", assignedAt: "2026-07-01T07:20" },
-];
+function storedAccessToken() {
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+    try {
+      const session = JSON.parse(localStorage.getItem(key) || "null");
+      if (session?.access_token) return String(session.access_token);
+    } catch {}
+  }
+  return null;
+}
+function authHeaders() {
+  const token = storedAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : undefined;
+}
 
 const headerAliases: Record<keyof Omit<FleetVehicle, "id">, string[]> = {
   brand: ["marka", "brand", "manufacturer", "producent"],
@@ -97,12 +105,14 @@ function formatDate(value: string) {
 }
 
 export default function FleetManager({ importOpen, onCloseImport }: { importOpen: boolean; onCloseImport: () => void }) {
-  const [vehicles, setVehicles] = useState(initialVehicles);
+  const [vehicles, setVehicles] = useState<FleetVehicle[]>([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [preview, setPreview] = useState<FleetVehicle[]>([]);
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [imported, setImported] = useState<number | null>(null);
+  const [importing, setImporting] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualForm, setManualForm] = useState({
     brand: "",
@@ -112,9 +122,26 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     assignedAt: new Date().toISOString().slice(0, 16),
   });
   const [manualError, setManualError] = useState<string | null>(null);
+  const [manualSaving, setManualSaving] = useState(false);
 
   const filtered = useMemo(() => vehicles.filter((vehicle) => `${vehicle.brand} ${vehicle.model} ${vehicle.registration} ${vehicle.customer}`.toLowerCase().includes(query.toLowerCase())), [query, vehicles]);
   const invalidRows = preview.filter((row) => !row.brand || !row.model || !row.registration || !row.customer || !row.assignedAt || Number.isNaN(new Date(row.assignedAt).getTime()));
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/fleet/vehicles", { headers: authHeaders() })
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled) return;
+        if (Array.isArray(data.vehicles)) setVehicles(data.vehicles);
+      })
+      .finally(() => {
+        if (!cancelled) setVehiclesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -134,16 +161,30 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     }
   }
 
-  function confirmImport() {
+  async function confirmImport() {
     if (invalidRows.length > 0 || preview.length === 0) return;
-    setVehicles((current) => {
-      const importedRegistrations = new Set(preview.map((row) => normalize(row.registration)));
-      return [...preview, ...current.filter((row) => !importedRegistrations.has(normalize(row.registration)))];
-    });
-    setImported(preview.length); setPreview([]); setFileName("");
+    setImporting(true);
+    try {
+      const response = await fetch("/api/fleet/vehicles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ vehicles: preview.map(({ brand, model, registration, customer, assignedAt }) => ({ brand, model, registration, customer, assignedAt })) }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Nie udało się zaimportować floty.");
+      setVehicles((current) => {
+        const importedIds = new Set((data.vehicles as FleetVehicle[]).map((row) => row.id));
+        return [...(data.vehicles as FleetVehicle[]), ...current.filter((row) => !importedIds.has(row.id))];
+      });
+      setImported(preview.length); setPreview([]); setFileName(""); setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Nie udało się zaimportować floty.");
+    } finally {
+      setImporting(false);
+    }
   }
 
-  function addVehicle() {
+  async function addVehicle() {
     const brand = manualForm.brand.trim();
     const model = manualForm.model.trim();
     const registration = manualForm.registration.trim().toUpperCase();
@@ -156,17 +197,40 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       setManualError("Pojazd z tym numerem rejestracyjnym już istnieje.");
       return;
     }
-    setVehicles((current) => [
-      { id: `manual-${Date.now()}`, brand, model, registration, customer, assignedAt: manualForm.assignedAt },
-      ...current,
-    ]);
-    setManualForm({ brand: "", model: "", registration: "", customer: "", assignedAt: new Date().toISOString().slice(0, 16) });
-    setManualError(null);
-    setManualOpen(false);
+    setManualSaving(true);
+    try {
+      const response = await fetch("/api/fleet/vehicles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ vehicles: [{ brand, model, registration, customer, assignedAt: manualForm.assignedAt }] }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Nie udało się dodać pojazdu.");
+      const [created] = data.vehicles as FleetVehicle[];
+      setVehicles((current) => [created, ...current]);
+      setManualForm({ brand: "", model: "", registration: "", customer: "", assignedAt: new Date().toISOString().slice(0, 16) });
+      setManualError(null);
+      setManualOpen(false);
+    } catch (reason) {
+      setManualError(reason instanceof Error ? reason.message : "Nie udało się dodać pojazdu.");
+    } finally {
+      setManualSaving(false);
+    }
   }
 
-  function removeVehicle(id: string) {
+  async function removeVehicle(id: string) {
+    const previous = vehicles;
     setVehicles((current) => current.filter((vehicle) => vehicle.id !== id));
+    try {
+      const response = await fetch(`/api/fleet/vehicles/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
+      if (!response.ok) {
+        const data = await response.json().catch(() => null);
+        throw new Error(data?.error || "Nie udało się usunąć pojazdu.");
+      }
+    } catch (reason) {
+      setVehicles(previous);
+      setError(reason instanceof Error ? reason.message : "Nie udało się usunąć pojazdu.");
+    }
   }
 
   function downloadTemplate() {
@@ -186,7 +250,8 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><div className={styles.headerActions}><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label><button type="button" className={styles.addVehicleButton} onClick={() => { setManualOpen(true); setManualError(null); }}><Plus size={17} />Dodaj pojazd</button></div></div>
       <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Przekazano od</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td><td><button type="button" className={styles.removeVehicle} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
       <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.activeStatus}>Aktywny</span><button type="button" className={styles.removeVehicle} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
-      {filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
+      {vehiclesLoading && vehicles.length === 0 && <div className={styles.empty}>Ładowanie floty…</div>}
+      {!vehiclesLoading && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
     </section>
 
     {manualOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-manual-title"><button className={styles.backdrop} onClick={() => setManualOpen(false)} aria-label="Zamknij" /><section className={styles.modal}>
@@ -199,7 +264,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
         <label>Data i czas przekazania<input type="datetime-local" value={manualForm.assignedAt} onChange={(event) => setManualForm((current) => ({ ...current, assignedAt: event.target.value }))} /></label>
       </div>
       {manualError && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można dodać pojazdu</strong><small>{manualError}</small></span></div>}
-      <footer><button className={styles.cancel} onClick={() => setManualOpen(false)}>Anuluj</button><button className={styles.confirm} onClick={addVehicle}>Dodaj pojazd</button></footer>
+      <footer><button className={styles.cancel} onClick={() => setManualOpen(false)}>Anuluj</button><button className={styles.confirm} disabled={manualSaving} onClick={addVehicle}>{manualSaving ? "Zapisywanie…" : "Dodaj pojazd"}</button></footer>
     </section></div>}
 
     {importOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-import-title"><button className={styles.backdrop} onClick={onCloseImport} aria-label="Zamknij import" /><section className={styles.modal}>
@@ -209,7 +274,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       {error && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można zaimportować pliku</strong><small>{error}</small></span></div>}
       {imported !== null && <div className={styles.success}><CheckCircle2 size={18} />Zaimportowano {imported} pojazdów.</div>}
       {preview.length > 0 && <div className={styles.preview}><div className={styles.previewHeader}><div><h3>Podgląd importu</h3><span>{fileName}</span></div><strong>{preview.length} wierszy</strong></div>{invalidRows.length > 0 && <div className={styles.error}><CircleAlert size={18} /><span><strong>{invalidRows.length} niekompletnych wierszy</strong><small>Uzupełnij wymagane pola w pliku i załaduj go ponownie.</small></span></div>}<div className={styles.previewTable}><table><thead><tr><th>Marka / model</th><th>Nr rej.</th><th>Klient</th><th>Data i czas</th></tr></thead><tbody>{preview.slice(0, 5).map((row) => <tr key={row.id}><td>{row.brand} {row.model}</td><td>{row.registration}</td><td>{row.customer}</td><td>{row.assignedAt}</td></tr>)}</tbody></table></div></div>}
-      <footer><button className={styles.cancel} onClick={onCloseImport}>Anuluj</button><button className={styles.confirm} disabled={preview.length === 0 || invalidRows.length > 0} onClick={confirmImport}>Importuj {preview.length > 0 ? `${preview.length} pojazdów` : "flotę"}</button></footer>
+      <footer><button className={styles.cancel} onClick={onCloseImport}>Anuluj</button><button className={styles.confirm} disabled={preview.length === 0 || invalidRows.length > 0 || importing} onClick={confirmImport}>{importing ? "Importowanie…" : `Importuj ${preview.length > 0 ? `${preview.length} pojazdów` : "flotę"}`}</button></footer>
     </section></div>}
   </>;
 }
