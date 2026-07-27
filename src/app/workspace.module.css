@@ -1757,28 +1757,10 @@
   }
 }
 
-@media (max-height: 500px) and (pointer: coarse) {
-  .shell > .mobileHeader,
-  .shell > .sidebar,
-  .shell > .main,
-  .shell > .mobileScanButton,
-  .shell > .modalLayer,
-  .shell > .backdrop {
-    display: none;
-  }
-}
 
 @media (max-width: 900px) {
   .shell {
     display: block;
-  }
-  .shell > .mobileHeader,
-  .shell > .sidebar,
-  .shell > .main,
-  .shell > .mobileScanButton,
-  .shell > .modalLayer,
-  .shell > .backdrop {
-    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1817,14 +1799,6 @@
 }
 
 @media (max-width: 760px) {
-  .shell > .mobileHeader,
-  .shell > .sidebar,
-  .shell > .main,
-  .shell > .mobileScanButton,
-  .shell > .modalLayer,
-  .shell > .backdrop {
-    display: none;
-  }
   .desktopInstruction {
     display: none;
   }

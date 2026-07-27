@@ -33,7 +33,6 @@ import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import DeliveryPlanner from "./delivery-planner";
 import Employees from "./employees";
 import FleetManager from "./fleet-manager";
-import MobileCapture from "./mobile-capture";
 import bugStyles from "./auth-gate.module.css";
 import styles from "./workspace.module.css";
 
@@ -885,7 +884,6 @@ export default function MandatyWorkspace() {
 
   return (
     <div className={styles.shell}>
-      <MobileCapture />
       <header className={styles.mobileHeader}>
         <button
           className={styles.iconButton}
