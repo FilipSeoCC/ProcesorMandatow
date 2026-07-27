@@ -337,7 +337,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               name="email"
               type="email"
               required
-              autoComplete="email"
+              autoComplete="username"
               inputMode="email"
             />
           </label>

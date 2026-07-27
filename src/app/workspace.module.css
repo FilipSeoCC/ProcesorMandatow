@@ -193,8 +193,9 @@
   gap: 10px;
 }
 .topbarActions {
-  /* Leaves room for the fixed-position "Zglos blad" button in the same corner. */
-  margin-right: 150px;
+  /* Leaves room for the fixed-position "Zglos blad" + desktop-mode toggle
+     buttons, which float in the same top-right corner as a row. */
+  margin-right: 210px;
 }
 .primaryButton,
 .secondaryButton,
@@ -320,15 +321,15 @@
   color: #8b98aa;
 }
 .workspace {
-  height: calc(100dvh - 224px);
-  min-height: 720px;
+  /* Grows with content — the page itself is the single scroll container
+     instead of nesting a separate scroll region per panel. */
+  min-height: 640px;
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 16px;
   display: grid;
   grid-template-columns: 340px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr);
-  overflow: hidden;
+  align-items: start;
   box-shadow: 0 12px 35px #1720330a;
 }
 .casePanel {
@@ -416,7 +417,8 @@
   min-width: 160px;
 }
 .caseList {
-  overflow-y: auto;
+  /* Grows with content instead of scrolling independently — the page is
+     the single scroll container. */
 }
 .accountMenuWrap {
   position: relative;
@@ -527,13 +529,16 @@
   border: 1px solid #f5c6c6;
 }
 .desktopModeToggle {
+  /* Sits directly left of the fixed "Zglos blad" button (auth-gate.module.css
+     .reportBugButton, right:14px/top:14px) so both float in one row instead
+     of stacking. */
   position: fixed;
-  right: 14px;
-  top: 100px;
+  right: 162px;
+  top: 14px;
   z-index: 40;
-  width: 38px;
-  height: 38px;
-  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   background: var(--navy);
   color: #fff;
   display: grid;
@@ -747,11 +752,9 @@
   font-weight: 700;
 }
 .reviewGrid {
-  min-height: 0;
-  flex: 1;
   display: grid;
   grid-template-columns: minmax(290px, 0.82fr) minmax(410px, 1.18fr);
-  grid-template-rows: minmax(0, 1fr);
+  align-items: start;
 }
 .documentPane {
   background: #e9eef5;
@@ -870,13 +873,8 @@
 }
 .dataPane {
   min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
 }
 .dataPaneScroll {
-  min-height: 0;
-  overflow-y: auto;
   padding: 18px 20px 16px;
 }
 .analysisBanner {
@@ -1596,11 +1594,13 @@
   }
   .detailPanelOpen {
     display: flex;
+    flex-direction: column;
     position: fixed;
     inset: 0;
     z-index: 35;
     background: #fff;
     padding-top: env(safe-area-inset-top);
+    overflow-y: auto;
   }
   .mobileScanButton {
     position: fixed;

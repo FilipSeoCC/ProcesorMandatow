@@ -210,31 +210,49 @@ export async function POST(request: Request) {
       { status: 502 },
     );
 
-  await fetch(
-    `${url}/rest/v1/vehicle_assignments?organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_to=is.null`,
-    {
-      method: "PATCH",
-      headers: { ...jsonHeaders, Prefer: "return=minimal" },
-      body: JSON.stringify({ valid_to: assignedAtIso }),
-    },
+  // vehicle_assignments has an exclusion constraint forbidding overlapping
+  // date ranges per vehicle. If an open assignment already exists, update it
+  // in place instead of closing + re-inserting — closing an assignment at
+  // the exact instant it started (e.g. re-saving without changing the date)
+  // would create a zero-width/duplicate range and violate the constraint.
+  const existingAssignmentResponse = await fetch(
+    `${url}/rest/v1/vehicle_assignments?select=id&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_to=is.null&limit=1`,
+    { headers, cache: "no-store" },
   );
-  const createAssignment = await fetch(`${url}/rest/v1/vehicle_assignments`, {
-    method: "POST",
-    headers: { ...jsonHeaders, Prefer: "return=minimal" },
-    body: JSON.stringify({
-      organization_id: member.organizationId,
-      vehicle_id: vehicleId,
-      customer_id: customerId,
-      valid_from: assignedAtIso,
-      source: "manual",
-      created_by: member.userId,
-    }),
-  });
-  if (!createAssignment.ok)
+  const existingAssignments = existingAssignmentResponse.ok
+    ? ((await existingAssignmentResponse.json()) as Array<{ id: string }>)
+    : [];
+  const existingAssignmentId = existingAssignments[0]?.id ?? null;
+
+  const assignmentResponse = existingAssignmentId
+    ? await fetch(
+        `${url}/rest/v1/vehicle_assignments?id=eq.${existingAssignmentId}&organization_id=eq.${member.organizationId}`,
+        {
+          method: "PATCH",
+          headers: { ...jsonHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ customer_id: customerId, valid_from: assignedAtIso }),
+        },
+      )
+    : await fetch(`${url}/rest/v1/vehicle_assignments`, {
+        method: "POST",
+        headers: { ...jsonHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({
+          organization_id: member.organizationId,
+          vehicle_id: vehicleId,
+          customer_id: customerId,
+          valid_from: assignedAtIso,
+          source: "manual",
+          created_by: member.userId,
+        }),
+      });
+  if (!assignmentResponse.ok) {
+    const detail = await assignmentResponse.text().catch(() => "");
+    console.error("vehicle_assignments write failed", assignmentResponse.status, detail);
     return NextResponse.json(
       { error: "Nie udało się przypisać klienta do pojazdu." },
       { status: 502 },
     );
+  }
 
   return NextResponse.json({
     vehicle: {
