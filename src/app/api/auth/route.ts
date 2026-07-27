@@ -57,7 +57,7 @@ async function membership(accessToken: string) {
   );
 }
 
-async function bootstrap(accessToken: string, companyName: string) {
+async function bootstrap(accessToken: string) {
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey) return { ok: false, schemaMissing: false };
   const response = await fetch(`${url}/rest/v1/rpc/bootstrap_organization`, {
@@ -67,7 +67,7 @@ async function bootstrap(accessToken: string, companyName: string) {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ company_name: companyName }),
+    body: JSON.stringify({ company_name: "FlotaFlow" }),
     cache: "no-store",
   });
   return {
@@ -135,7 +135,6 @@ export async function POST(request: Request) {
     action?: string;
     email?: string;
     password?: string;
-    companyName?: string;
     firstName?: string;
     lastName?: string;
     phone?: string;
@@ -222,10 +221,7 @@ export async function POST(request: Request) {
 
   let member = await membership(authData.access_token);
   if (!member) {
-    const created = await bootstrap(
-      authData.access_token,
-      body?.companyName?.trim() || "FlotaFlow",
-    );
+    const created = await bootstrap(authData.access_token);
     if (!created.ok)
       return NextResponse.json(
         {

@@ -3,29 +3,13 @@
 import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import {
-  Bug,
-  CheckCircle2,
   FileText,
-  ImagePlus,
   LoaderCircle,
   LockKeyhole,
   LogOut,
   ShieldCheck,
-  X,
 } from "lucide-react";
 import styles from "./auth-gate.module.css";
-
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "guest" | "ready">(
@@ -35,30 +19,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [bugOpen, setBugOpen] = useState(false);
-  const [bugDescription, setBugDescription] = useState("");
-  const [bugStatus, setBugStatus] = useState<
-    "idle" | "sending" | "sent" | "error"
-  >("idle");
-  const [bugError, setBugError] = useState<string | null>(null);
-  const [bugAttachment, setBugAttachment] = useState<File | null>(null);
-  const [bugAttachmentPreview, setBugAttachmentPreview] = useState<
-    string | null
-  >(null);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- gate for a document.body portal target that only exists client-side
     setMounted(true);
   }, []);
-
-  function setBugAttachmentFile(file: File | null) {
-    setBugAttachmentPreview((current) => {
-      if (current) URL.revokeObjectURL(current);
-      return file ? URL.createObjectURL(file) : null;
-    });
-    setBugAttachment(file);
-  }
 
   useEffect(() => {
     fetch("/api/auth", { cache: "no-store" })
@@ -79,7 +45,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         action: mode,
         email: form.get("email"),
         password: form.get("password"),
-        companyName: form.get("companyName"),
         firstName: form.get("firstName"),
         lastName: form.get("lastName"),
         phone: form.get("phone"),
@@ -104,55 +69,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setStatus("guest");
   }
 
-  async function submitBugReport() {
-    const description = bugDescription.trim();
-    if (!description) {
-      setBugStatus("error");
-      setBugError("Opisz co się stało.");
-      return;
-    }
-    setBugStatus("sending");
-    setBugError(null);
-    try {
-      const token = storedAccessToken();
-      const form = new FormData();
-      form.set("description", description);
-      form.set("context", document.title);
-      if (bugAttachment) form.set("attachment", bugAttachment);
-      const response = await fetch("/api/bug-reports", {
-        method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-        body: form,
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok)
-        throw new Error(data.error || "Nie udało się wysłać zgłoszenia.");
-      setBugStatus("sent");
-      setBugDescription("");
-      setBugAttachmentFile(null);
-      window.setTimeout(() => {
-        setBugOpen(false);
-        setBugStatus("idle");
-      }, 1600);
-    } catch (reason) {
-      setBugStatus("error");
-      setBugError(
-        reason instanceof Error ? reason.message : "Nie udało się wysłać zgłoszenia.",
-      );
-    }
-  }
-
-  function pickBugAttachment(candidate: File | null) {
-    if (!candidate) return;
-    if (!candidate.type.startsWith("image/")) return;
-    if (candidate.size > 8 * 1024 * 1024) {
-      setBugStatus("error");
-      setBugError("Zrzut ekranu przekracza limit 8 MB.");
-      return;
-    }
-    setBugAttachmentFile(candidate);
-  }
-
   if (status === "loading")
     return (
       <main className={styles.loading}>
@@ -165,123 +81,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
       <>
         {mounted &&
           createPortal(
-            <>
-              <button
-                className={styles.mobileLogout}
-                onClick={signOut}
-                aria-label="Wyloguj"
-              >
-                <LogOut size={18} />
-              </button>
-              <button
-                type="button"
-                className={styles.reportBugButton}
-                onClick={() => {
-                  setBugOpen(true);
-                  setBugStatus("idle");
-                  setBugError(null);
-                }}
-                aria-label="Zgłoś błąd"
-              >
-                <Bug size={16} />
-                <span className={styles.bugLabel}>Zgłoś błąd</span>
-              </button>
-              {bugOpen && (
-                <div
-                  className={styles.bugModalLayer}
-                  role="dialog"
-                  aria-modal="true"
-            aria-labelledby="bug-report-title"
-          >
             <button
-              className={styles.bugModalBackdrop}
-              onClick={() => {
-                setBugOpen(false);
-                setBugAttachmentFile(null);
-              }}
-              aria-label="Zamknij"
-            />
-            <div className={styles.bugModal}>
-              <header>
-                <h2 id="bug-report-title">Zgłoś błąd</h2>
-                <button
-                  onClick={() => {
-                    setBugOpen(false);
-                    setBugAttachmentFile(null);
-                  }}
-                  aria-label="Zamknij"
-                >
-                  <X size={19} />
-                </button>
-              </header>
-              {bugStatus === "sent" ? (
-                <div className={styles.bugSent} role="status">
-                  <CheckCircle2 size={20} />
-                  Zgłoszenie wysłane, dziękujemy.
-                </div>
-              ) : (
-                <>
-                  <label>
-                    Co się stało?
-                    <textarea
-                      value={bugDescription}
-                      onChange={(event) => setBugDescription(event.target.value)}
-                      onPaste={(event) => {
-                        const item = Array.from(
-                          event.clipboardData.items,
-                        ).find((entry) => entry.type.startsWith("image/"));
-                        const file = item?.getAsFile();
-                        if (file) pickBugAttachment(file);
-                      }}
-                      rows={5}
-                      placeholder="Opisz problem — co robiłeś, co się stało, czego się spodziewałeś. Możesz wkleić zrzut ekranu (Ctrl+V)."
-                    />
-                  </label>
-                  <div className={styles.bugAttachRow}>
-                    <label className={styles.bugAttachButton}>
-                      <ImagePlus size={15} />
-                      {bugAttachment ? "Zmień zrzut ekranu" : "Dodaj zrzut ekranu lub plik"}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={(event) =>
-                          pickBugAttachment(event.target.files?.[0] ?? null)
-                        }
-                      />
-                    </label>
-                    {bugAttachmentPreview && (
-                      <div className={styles.bugAttachPreview}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={bugAttachmentPreview} alt="Podgląd załącznika" />
-                        <button
-                          type="button"
-                          onClick={() => setBugAttachmentFile(null)}
-                          aria-label="Usuń załącznik"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {bugStatus === "error" && bugError && (
-                    <p className={styles.bugError} role="alert">
-                      {bugError}
-                    </p>
-                  )}
-                  <button
-                    type="button"
-                    className={styles.bugSubmit}
-                    disabled={bugStatus === "sending"}
-                    onClick={submitBugReport}
-                  >
-                    {bugStatus === "sending" ? "Wysyłam…" : "Wyślij zgłoszenie"}
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-              )}
-            </>,
+              className={styles.mobileLogout}
+              onClick={signOut}
+              aria-label="Wyloguj"
+            >
+              <LogOut size={18} />
+            </button>,
             document.body,
           )}
         {children}
@@ -315,15 +121,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         <form onSubmit={submit}>
           {mode === "sign-up" && (
             <>
-              <label>
-                Nazwa firmy
-                <input
-                  name="companyName"
-                  required
-                  minLength={2}
-                  autoComplete="organization"
-                />
-              </label>
               <label>
                 Imię
                 <input name="firstName" required autoComplete="given-name" />

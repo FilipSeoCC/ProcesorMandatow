@@ -18,12 +18,10 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
-  Monitor,
   MoreHorizontal,
   ScanLine,
   Search,
   ShieldCheck,
-  Smartphone,
   Trash2,
   Upload,
   UserRound,
@@ -32,11 +30,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
-import { createPortal } from "react-dom";
 import DeliveryPlanner from "./delivery-planner";
 import Employees from "./employees";
 import FleetManager from "./fleet-manager";
 import MobileCapture from "./mobile-capture";
+import bugStyles from "./auth-gate.module.css";
 import styles from "./workspace.module.css";
 
 type CaseStatus =
@@ -87,6 +85,18 @@ function renamedFile(file: File, displayName: string) {
     type: file.type,
     lastModified: file.lastModified,
   });
+}
+
+function storedAccessToken() {
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index);
+    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
+    try {
+      const session = JSON.parse(localStorage.getItem(key) || "null");
+      if (session?.access_token) return String(session.access_token);
+    } catch {}
+  }
+  return null;
 }
 
 const demoCases: CaseItem[] = [
@@ -189,10 +199,20 @@ export default function MandatyWorkspace() {
     "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
-  const [desktopMode, setDesktopMode] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [accountMenuOpen, setAccountMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [bugReportOpen, setBugReportOpen] = useState(false);
+  const [bugReportDescription, setBugReportDescription] = useState("");
+  const [bugReportStatus, setBugReportStatus] = useState<
+    "idle" | "sending" | "sent" | "error"
+  >("idle");
+  const [bugReportError, setBugReportError] = useState<string | null>(null);
+  const [bugReportAttachment, setBugReportAttachment] = useState<File | null>(
+    null,
+  );
+  const [bugReportAttachmentPreview, setBugReportAttachmentPreview] =
+    useState<string | null>(null);
   const [account, setAccount] = useState<{
     email: string | null;
     role: string | null;
@@ -234,7 +254,6 @@ export default function MandatyWorkspace() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
-  const [mounted, setMounted] = useState(false);
   const [team, setTeam] = useState<
     Array<{ userId: string; role: string; email: string | null; name: string | null }>
   >([]);
@@ -265,11 +284,6 @@ export default function MandatyWorkspace() {
 
   const selected =
     caseItems.find((item) => item.id === selectedId) ?? caseItems[0];
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- gate for a document.body portal target that only exists client-side
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the edit form when the selected case changes, not a derived-render value
@@ -536,14 +550,6 @@ export default function MandatyWorkspace() {
   }
 
   useEffect(() => {
-    const meta = document.querySelector('meta[name="viewport"]');
-    meta?.setAttribute(
-      "content",
-      desktopMode ? "width=1280" : "width=device-width, initial-scale=1",
-    );
-  }, [desktopMode]);
-
-  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 5000);
     return () => window.clearTimeout(timer);
@@ -780,6 +786,63 @@ export default function MandatyWorkspace() {
     window.location.reload();
   }
 
+  function setBugReportAttachmentFile(file: File | null) {
+    setBugReportAttachmentPreview((current) => {
+      if (current) URL.revokeObjectURL(current);
+      return file ? URL.createObjectURL(file) : null;
+    });
+    setBugReportAttachment(file);
+  }
+
+  function pickBugReportAttachment(candidate: File | null) {
+    if (!candidate) return;
+    if (!candidate.type.startsWith("image/")) return;
+    if (candidate.size > 8 * 1024 * 1024) {
+      setBugReportStatus("error");
+      setBugReportError("Zrzut ekranu przekracza limit 8 MB.");
+      return;
+    }
+    setBugReportAttachmentFile(candidate);
+  }
+
+  async function submitBugReportForm() {
+    const description = bugReportDescription.trim();
+    if (!description) {
+      setBugReportStatus("error");
+      setBugReportError("Opisz co się stało.");
+      return;
+    }
+    setBugReportStatus("sending");
+    setBugReportError(null);
+    try {
+      const token = storedAccessToken();
+      const form = new FormData();
+      form.set("description", description);
+      form.set("context", document.title);
+      if (bugReportAttachment) form.set("attachment", bugReportAttachment);
+      const response = await fetch("/api/bug-reports", {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: form,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się wysłać zgłoszenia.");
+      setBugReportStatus("sent");
+      setBugReportDescription("");
+      setBugReportAttachmentFile(null);
+      window.setTimeout(() => {
+        setBugReportOpen(false);
+        setBugReportStatus("idle");
+      }, 1600);
+    } catch (reason) {
+      setBugReportStatus("error");
+      setBugReportError(
+        reason instanceof Error ? reason.message : "Nie udało się wysłać zgłoszenia.",
+      );
+    }
+  }
+
   async function uploadDesktopDocument() {
     if (!uploadedPages.length || uploading) return;
     setUploading(true);
@@ -948,6 +1011,19 @@ export default function MandatyWorkspace() {
                 >
                   <UserRound size={16} />
                   Ustawienia
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setBugReportOpen(true);
+                    setBugReportStatus("idle");
+                    setBugReportError(null);
+                    setAccountMenuOpen(false);
+                  }}
+                >
+                  <Bug size={16} />
+                  Zgłoś błąd
                 </button>
                 <button
                   type="button"
@@ -1650,24 +1726,6 @@ export default function MandatyWorkspace() {
         </button>
       )}
 
-      {mounted &&
-        createPortal(
-          <button
-            type="button"
-            className={styles.desktopModeToggle}
-            onClick={() => setDesktopMode((current) => !current)}
-            aria-label={
-              desktopMode
-                ? "Przełącz na widok mobilny"
-                : "Przełącz na widok desktopowy"
-            }
-            title={desktopMode ? "Widok mobilny" : "Widok desktopowy"}
-          >
-            {desktopMode ? <Smartphone size={17} /> : <Monitor size={17} />}
-          </button>,
-          document.body,
-        )}
-
       {toast && (
         <div
           className={`${styles.toast} ${toast.success ? styles.toastSuccess : styles.toastError}`}
@@ -1818,6 +1876,109 @@ export default function MandatyWorkspace() {
                 {passwordStatus === "saving" ? "Zapisuję…" : "Zmień hasło"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {bugReportOpen && (
+        <div
+          className={bugStyles.bugModalLayer}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bug-report-title"
+        >
+          <button
+            className={bugStyles.bugModalBackdrop}
+            onClick={() => {
+              setBugReportOpen(false);
+              setBugReportAttachmentFile(null);
+            }}
+            aria-label="Zamknij"
+          />
+          <div className={bugStyles.bugModal}>
+            <header>
+              <h2 id="bug-report-title">Zgłoś błąd</h2>
+              <button
+                onClick={() => {
+                  setBugReportOpen(false);
+                  setBugReportAttachmentFile(null);
+                }}
+                aria-label="Zamknij"
+              >
+                <X size={19} />
+              </button>
+            </header>
+            {bugReportStatus === "sent" ? (
+              <div className={bugStyles.bugSent} role="status">
+                <CheckCircle2 size={20} />
+                Zgłoszenie wysłane, dziękujemy.
+              </div>
+            ) : (
+              <>
+                <label>
+                  Co się stało?
+                  <textarea
+                    value={bugReportDescription}
+                    onChange={(event) =>
+                      setBugReportDescription(event.target.value)
+                    }
+                    onPaste={(event) => {
+                      const item = Array.from(event.clipboardData.items).find(
+                        (entry) => entry.type.startsWith("image/"),
+                      );
+                      const file = item?.getAsFile();
+                      if (file) pickBugReportAttachment(file);
+                    }}
+                    rows={5}
+                    placeholder="Opisz problem — co robiłeś, co się stało, czego się spodziewałeś. Możesz wkleić zrzut ekranu (Ctrl+V)."
+                  />
+                </label>
+                <div className={bugStyles.bugAttachRow}>
+                  <label className={bugStyles.bugAttachButton}>
+                    <ImagePlus size={15} />
+                    {bugReportAttachment
+                      ? "Zmień zrzut ekranu"
+                      : "Dodaj zrzut ekranu lub plik"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(event) =>
+                        pickBugReportAttachment(event.target.files?.[0] ?? null)
+                      }
+                    />
+                  </label>
+                  {bugReportAttachmentPreview && (
+                    <div className={bugStyles.bugAttachPreview}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={bugReportAttachmentPreview}
+                        alt="Podgląd załącznika"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setBugReportAttachmentFile(null)}
+                        aria-label="Usuń załącznik"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {bugReportStatus === "error" && bugReportError && (
+                  <p className={bugStyles.bugError} role="alert">
+                    {bugReportError}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  className={bugStyles.bugSubmit}
+                  disabled={bugReportStatus === "sending"}
+                  onClick={submitBugReportForm}
+                >
+                  {bugReportStatus === "sending" ? "Wysyłam…" : "Wyślij zgłoszenie"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
