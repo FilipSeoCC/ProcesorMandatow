@@ -389,6 +389,26 @@
   appearance: none;
   cursor: pointer;
 }
+.selectBox input {
+  min-width: 0;
+  width: 100%;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  color: #26364b;
+  background: transparent;
+}
+.docFilters {
+  padding: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid var(--line);
+}
+.docFilters .selectBox {
+  width: auto;
+  min-width: 160px;
+}
 .caseList {
   overflow-y: auto;
 }
@@ -601,6 +621,10 @@
 .statusNew {
   background: var(--blue-soft);
   color: #245dcc;
+}
+.statusResolved {
+  background: #efe7fb;
+  color: #6a3fb5;
 }
 .sender {
   display: block;

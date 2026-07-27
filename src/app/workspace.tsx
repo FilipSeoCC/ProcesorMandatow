@@ -37,11 +37,18 @@ import FleetManager from "./fleet-manager";
 import MobileCapture from "./mobile-capture";
 import styles from "./workspace.module.css";
 
-type CaseStatus = "Do weryfikacji" | "Dopasowano" | "Nowa";
+type CaseStatus =
+  | "Do weryfikacji"
+  | "Dopasowano"
+  | "Nowa"
+  | "Zweryfikowana"
+  | "Zrealizowana";
 
 type CaseItem = {
   id: string;
   documentId?: string;
+  uploadedBy?: string | null;
+  createdAt?: string;
   plate: string;
   sender: string;
   eventAt: string;
@@ -53,6 +60,11 @@ type CaseItem = {
   previewUrl?: string | null;
   ocrStatus?: string;
   ocrText?: string | null;
+  responsibleName?: string;
+  responsibleTaxId?: string;
+  responsibleEmail?: string;
+  confirmedAt?: string | null;
+  resolvedAt?: string | null;
 };
 
 // Statuses the background OCR job can still move on from by itself —
@@ -130,6 +142,8 @@ const statusClass: Record<CaseStatus, string> = {
   "Do weryfikacji": styles.statusReview,
   Dopasowano: styles.statusMatched,
   Nowa: styles.statusNew,
+  Zweryfikowana: styles.statusMatched,
+  Zrealizowana: styles.statusResolved,
 };
 
 export default function MandatyWorkspace() {
@@ -144,6 +158,7 @@ export default function MandatyWorkspace() {
   const [account, setAccount] = useState<{
     email: string | null;
     role: string | null;
+    userId: string | null;
   } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [passwordStatus, setPasswordStatus] = useState<
@@ -166,10 +181,46 @@ export default function MandatyWorkspace() {
   const [processing, setProcessing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [matching, setMatching] = useState(false);
+  const [matchMessage, setMatchMessage] = useState<string | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [team, setTeam] = useState<
+    Array<{ userId: string; role: string; email: string | null; name: string | null }>
+  >([]);
+  const [docEmployeeFilter, setDocEmployeeFilter] = useState("Wszyscy");
+  const [docDateFrom, setDocDateFrom] = useState("");
+  const [docDateTo, setDocDateTo] = useState("");
+  const [draft, setDraft] = useState({
+    plate: "",
+    eventAt: "",
+    sender: "",
+    responsibleName: "",
+    responsibleTaxId: "",
+    responsibleEmail: "",
+  });
 
   const selected =
     caseItems.find((item) => item.id === selectedId) ?? caseItems[0];
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the edit form when the selected case changes, not a derived-render value
+    setDraft({
+      plate: selected.plate === "OCR…" ? "" : selected.plate,
+      eventAt: selected.eventAt === "Oczekuje na OCR" ? "" : selected.eventAt,
+      sender:
+        selected.sender === "Nowy dokument z telefonu" ? "" : selected.sender,
+      responsibleName: selected.responsibleName ?? "",
+      responsibleTaxId: selected.responsibleTaxId ?? "",
+      responsibleEmail: selected.responsibleEmail ?? "",
+    });
+    setMatchMessage(null);
+    setSaveError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.id]);
+
   const filtered = useMemo(
     () =>
       caseItems.filter((item) => {
@@ -183,6 +234,41 @@ export default function MandatyWorkspace() {
     [caseItems, filter, query],
   );
 
+  const caseMetrics = useMemo(() => {
+    const newCount = caseItems.filter((item) => item.status === "Nowa").length;
+    const pendingOcrCount = caseItems.filter(
+      (item) => item.ocrStatus && pendingOcrStatuses.has(item.ocrStatus),
+    ).length;
+    const reviewCount = caseItems.filter(
+      (item) => item.status === "Do weryfikacji",
+    ).length;
+    const matchedCount = caseItems.filter((item) => item.responsibleName).length;
+    const matchedPercent = caseItems.length
+      ? Math.round((matchedCount / caseItems.length) * 100)
+      : 0;
+    return { newCount, pendingOcrCount, reviewCount, matchedPercent };
+  }, [caseItems]);
+
+  function employeeLabel(userId?: string | null) {
+    if (!userId) return "Nieznany";
+    const member = team.find((entry) => entry.userId === userId);
+    return member?.name || member?.email || "Nieznany";
+  }
+
+  const docFiltered = useMemo(
+    () =>
+      caseItems.filter((item) => {
+        const matchesEmployee =
+          docEmployeeFilter === "Wszyscy" ||
+          (item.uploadedBy ?? "") === docEmployeeFilter;
+        const day = item.createdAt ? item.createdAt.slice(0, 10) : "";
+        const matchesFrom = !docDateFrom || (day && day >= docDateFrom);
+        const matchesTo = !docDateTo || (day && day <= docDateTo);
+        return matchesEmployee && matchesFrom && matchesTo;
+      }),
+    [caseItems, docEmployeeFilter, docDateFrom, docDateTo],
+  );
+
   async function loadDocuments(preserveSelection: boolean) {
     const response = await fetch("/api/documents", { cache: "no-store" });
     if (!response.ok) return null;
@@ -191,18 +277,25 @@ export default function MandatyWorkspace() {
         id: string;
         status: string;
         created_at: string;
+        uploaded_by: string | null;
         registration_number: string | null;
         event_at: string | null;
         case_number: string | null;
         sender: string | null;
         previewUrl: string | null;
         ocr_text: string | null;
+        responsible_name: string;
+        responsible_tax_id: string;
+        responsible_email: string;
+        confirmed_at: string | null;
+        resolved_at: string | null;
       }>;
     };
     if (!result.documents?.length) return null;
     const mapped: CaseItem[] = result.documents.map((document) => ({
       id: document.case_number || document.id.slice(0, 13).toUpperCase(),
       documentId: document.id,
+      uploadedBy: document.uploaded_by,
       plate: document.registration_number || "OCR…",
       sender: document.sender || "Nowy dokument z telefonu",
       eventAt: document.event_at || "Oczekuje na OCR",
@@ -212,18 +305,27 @@ export default function MandatyWorkspace() {
         hour: "2-digit",
         minute: "2-digit",
       }),
+      createdAt: document.created_at,
       deadline: "—",
-      status:
-        document.status === "ready" ||
-        document.status === "needs_review" ||
-        document.status === "ocr_failed"
-          ? "Do weryfikacji"
-          : "Nowa",
-      customer: "—",
+      status: document.resolved_at
+        ? "Zrealizowana"
+        : document.confirmed_at
+          ? "Zweryfikowana"
+          : document.status === "ready" ||
+              document.status === "needs_review" ||
+              document.status === "ocr_failed"
+            ? "Do weryfikacji"
+            : "Nowa",
+      customer: document.responsible_name || "—",
       agreement: "—",
       previewUrl: document.previewUrl,
       ocrStatus: document.status,
       ocrText: document.ocr_text,
+      responsibleName: document.responsible_name,
+      responsibleTaxId: document.responsible_tax_id,
+      responsibleEmail: document.responsible_email,
+      confirmedAt: document.confirmed_at,
+      resolvedAt: document.resolved_at,
     }));
     const justFinished = mapped.find((item) => {
       const prior = caseItems.find((existing) => existing.id === item.id);
@@ -261,7 +363,18 @@ export default function MandatyWorkspace() {
     fetch("/api/auth", { cache: "no-store" })
       .then((response) => (response.ok ? response.json() : null))
       .then((data) => {
-        if (data) setAccount({ email: data.email ?? null, role: data.role ?? null });
+        if (data)
+          setAccount({
+            email: data.email ?? null,
+            role: data.role ?? null,
+            userId: data.userId ?? null,
+          });
+      })
+      .catch(() => null);
+    fetch("/api/team", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data?.team) setTeam(data.team);
       })
       .catch(() => null);
   }, []);
@@ -378,9 +491,91 @@ export default function MandatyWorkspace() {
     setUploadError(null);
   }
 
-  function handleSave() {
-    setSaved(true);
-    window.setTimeout(() => setSaved(false), 1800);
+  async function handleSave() {
+    if (!selected.documentId || saving) return;
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const response = await fetch(`/api/documents/${selected.documentId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          registrationNumber: draft.plate,
+          eventAt: draft.eventAt,
+          sender: draft.sender,
+          responsibleName: draft.responsibleName,
+          responsibleTaxId: draft.responsibleTaxId,
+          responsibleEmail: draft.responsibleEmail,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się zapisać sprawy.");
+      await loadDocuments(true);
+      setSaved(true);
+      window.setTimeout(() => setSaved(false), 1800);
+    } catch (reason) {
+      setSaveError(
+        reason instanceof Error ? reason.message : "Nie udało się zapisać sprawy.",
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function rematch() {
+    if (!selected.documentId || matching) return;
+    setMatching(true);
+    setMatchMessage(null);
+    try {
+      const response = await fetch(
+        `/api/documents/${selected.documentId}/match`,
+        { method: "POST" },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się dopasować klienta.");
+      if (data.matched) {
+        setDraft((current) => ({
+          ...current,
+          responsibleName: data.responsibleName ?? current.responsibleName,
+          responsibleTaxId: data.responsibleTaxId ?? current.responsibleTaxId,
+          responsibleEmail: data.responsibleEmail ?? current.responsibleEmail,
+        }));
+        setMatchMessage("Znaleziono dopasowanie — sprawdź dane i zatwierdź.");
+      } else {
+        setMatchMessage(
+          data.reason || "Nie znaleziono dopasowania — uzupełnij dane ręcznie.",
+        );
+      }
+    } catch (reason) {
+      setMatchMessage(
+        reason instanceof Error ? reason.message : "Nie udało się dopasować klienta.",
+      );
+    } finally {
+      setMatching(false);
+    }
+  }
+
+  async function markResolved() {
+    if (!selected.documentId || resolving) return;
+    setResolving(true);
+    try {
+      const response = await fetch(
+        `/api/documents/${selected.documentId}/resolve`,
+        { method: "POST" },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się oznaczyć sprawy.");
+      await loadDocuments(true);
+    } catch (reason) {
+      setSaveError(
+        reason instanceof Error ? reason.message : "Nie udało się oznaczyć sprawy.",
+      );
+    } finally {
+      setResolving(false);
+    }
   }
 
   async function signOut() {
@@ -481,7 +676,7 @@ export default function MandatyWorkspace() {
             className={`${styles.navItem} ${activeView === "cases" ? styles.navActive : ""}`}
           >
             <Inbox size={19} />
-            Sprawy<span className={styles.navCount}>7</span>
+            Sprawy<span className={styles.navCount}>{caseItems.length}</span>
           </button>
           <button
             type="button"
@@ -633,70 +828,128 @@ export default function MandatyWorkspace() {
         ) : activeView === "routes" ? (
           <DeliveryPlanner />
         ) : activeView === "documents" ? (
-          <section className={styles.documentsGrid} aria-label="Wszystkie dokumenty">
-            {caseItems.length === 0 ? (
-              <div className={styles.emptyState}>
-                <FileText size={24} />
-                <strong>Brak dokumentów</strong>
-                <span>Zeskanowane dokumenty pojawią się tutaj.</span>
-              </div>
-            ) : (
-              caseItems.map((item) => (
+          <>
+            <div className={styles.docFilters}>
+              <label className={styles.selectBox}>
+                <span className={styles.srOnly}>Filtr pracownika</span>
+                <select
+                  value={docEmployeeFilter}
+                  onChange={(event) => setDocEmployeeFilter(event.target.value)}
+                >
+                  <option value="Wszyscy">Wszyscy pracownicy</option>
+                  {team.map((member) => (
+                    <option key={member.userId} value={member.userId}>
+                      {member.name || member.email || member.userId}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown size={16} />
+              </label>
+              <label className={styles.selectBox}>
+                <span className={styles.srOnly}>Data od</span>
+                <input
+                  type="date"
+                  value={docDateFrom}
+                  onChange={(event) => setDocDateFrom(event.target.value)}
+                />
+              </label>
+              <label className={styles.selectBox}>
+                <span className={styles.srOnly}>Data do</span>
+                <input
+                  type="date"
+                  value={docDateTo}
+                  onChange={(event) => setDocDateTo(event.target.value)}
+                />
+              </label>
+              {(docEmployeeFilter !== "Wszyscy" || docDateFrom || docDateTo) && (
                 <button
-                  key={item.id}
-                  className={styles.documentCard}
+                  type="button"
+                  className={styles.textButton}
                   onClick={() => {
-                    setSelectedId(item.id);
-                    setActiveView("cases");
+                    setDocEmployeeFilter("Wszyscy");
+                    setDocDateFrom("");
+                    setDocDateTo("");
                   }}
                 >
-                  <span className={styles.documentThumb}>
-                    {item.previewUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={item.previewUrl} alt="" />
-                    ) : (
-                      <FileText size={26} />
-                    )}
+                  Wyczyść filtry
+                </button>
+              )}
+            </div>
+            <section
+              className={styles.documentsGrid}
+              aria-label="Wszystkie dokumenty"
+            >
+              {docFiltered.length === 0 ? (
+                <div className={styles.emptyState}>
+                  <FileText size={24} />
+                  <strong>Brak dokumentów</strong>
+                  <span>
+                    {caseItems.length === 0
+                      ? "Zeskanowane dokumenty pojawią się tutaj."
+                      : "Żaden dokument nie pasuje do wybranych filtrów."}
                   </span>
-                  <span className={styles.documentMeta}>
-                    <span className={styles.caseItemTop}>
-                      <strong className={styles.plate}>{item.plate}</strong>
-                      <span
-                        className={`${styles.status} ${statusClass[item.status]}`}
-                      >
-                        {item.status}
+                </div>
+              ) : (
+                docFiltered.map((item) => (
+                  <button
+                    key={item.id}
+                    className={styles.documentCard}
+                    onClick={() => {
+                      setSelectedId(item.id);
+                      setActiveView("cases");
+                    }}
+                  >
+                    <span className={styles.documentThumb}>
+                      {item.previewUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={item.previewUrl} alt="" />
+                      ) : (
+                        <FileText size={26} />
+                      )}
+                    </span>
+                    <span className={styles.documentMeta}>
+                      <span className={styles.caseItemTop}>
+                        <strong className={styles.plate}>{item.plate}</strong>
+                        <span
+                          className={`${styles.status} ${statusClass[item.status]}`}
+                        >
+                          {item.status}
+                        </span>
+                      </span>
+                      <span className={styles.sender}>{item.sender}</span>
+                      <span className={styles.caseMeta}>
+                        <span>{item.id}</span>
+                        <span>{item.receivedAt}</span>
+                      </span>
+                      <span className={styles.caseMeta}>
+                        <span>Zgłosił: {employeeLabel(item.uploadedBy)}</span>
                       </span>
                     </span>
-                    <span className={styles.sender}>{item.sender}</span>
-                    <span className={styles.caseMeta}>
-                      <span>{item.id}</span>
-                      <span>{item.receivedAt}</span>
-                    </span>
-                  </span>
-                </button>
-              ))
-            )}
-          </section>
+                  </button>
+                ))
+              )}
+            </section>
+          </>
         ) : (
           <>
             <section className={styles.metrics} aria-label="Podsumowanie spraw">
               <Metric
-                label="Nowe dzisiaj"
-                value="4"
-                detail="2 oczekują na analizę"
+                label="Nowe"
+                value={String(caseMetrics.newCount)}
+                detail={`${caseMetrics.pendingOcrCount} oczekuje na analizę OCR`}
                 icon={<Inbox size={19} />}
               />
               <Metric
                 label="Do weryfikacji"
-                value="3"
-                detail="Najstarsza: 2 dni"
+                value={String(caseMetrics.reviewCount)}
+                detail="Wymagają potwierdzenia danych"
                 icon={<Clock3 size={19} />}
                 tone="amber"
               />
               <Metric
-                label="Dopasowane automatycznie"
-                value="86%"
-                detail="W ostatnich 30 dniach"
+                label="Dopasowane"
+                value={`${caseMetrics.matchedPercent}%`}
+                detail="Wszystkich zgłoszeń"
                 icon={<CheckCircle2 size={19} />}
                 tone="green"
               />
@@ -707,7 +960,9 @@ export default function MandatyWorkspace() {
                 <div className={styles.panelHeader}>
                   <div>
                     <h2>Kolejka spraw</h2>
-                    <p>{filtered.length} z 7 aktywnych</p>
+                    <p>
+                      {filtered.length} z {caseItems.length} aktywnych
+                    </p>
                   </div>
                   <button
                     className={styles.moreButton}
@@ -737,7 +992,8 @@ export default function MandatyWorkspace() {
                       <option>Wszystkie</option>
                       <option>Nowa</option>
                       <option>Do weryfikacji</option>
-                      <option>Dopasowano</option>
+                      <option>Zweryfikowana</option>
+                      <option>Zrealizowana</option>
                     </select>
                     <ChevronDown size={16} />
                   </label>
@@ -853,16 +1109,32 @@ export default function MandatyWorkspace() {
                       <div className={styles.formGrid}>
                         <Field
                           label="Numer rejestracyjny"
-                          value={selected.plate}
+                          value={draft.plate}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, plate: value }))
+                          }
                           confident
                         />
                         <Field
                           label="Data i godzina zdarzenia"
-                          value={selected.eventAt}
+                          value={draft.eventAt}
+                          onChange={(value) =>
+                            setDraft((current) => ({
+                              ...current,
+                              eventAt: value,
+                            }))
+                          }
                           confident
                         />
                         <Field label="Numer sprawy" value={selected.id} />
-                        <Field label="Nadawca" value={selected.sender} wide />
+                        <Field
+                          label="Nadawca"
+                          value={draft.sender}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, sender: value }))
+                          }
+                          wide
+                        />
                       </div>
                       {selected.ocrText && (
                         <details className={styles.ocrRaw}>
@@ -879,61 +1151,104 @@ export default function MandatyWorkspace() {
                         <span className={styles.matchLabel}>
                           Dopasowany użytkownik pojazdu
                         </span>
-                        <strong>{selected.customer}</strong>
+                        <strong>
+                          {draft.responsibleName || "Brak dopasowania"}
+                        </strong>
                         <small>
-                          Umowa {selected.agreement} · okres obejmuje datę
-                          zdarzenia
+                          {draft.responsibleEmail ||
+                            "Uzupełnij dane ręcznie lub zmień dopasowanie"}
                         </small>
                       </div>
-                      <span className={styles.matchScore}>
-                        <Check size={15} />
-                        98%
-                      </span>
+                      {draft.responsibleName && (
+                        <span className={styles.matchScore}>
+                          <Check size={15} />
+                          OK
+                        </span>
+                      )}
                     </section>
+                    {matchMessage && (
+                      <p className={styles.uploadError}>{matchMessage}</p>
+                    )}
                     <section className={styles.formSection}>
                       <div className={styles.sectionHeading}>
                         <div>
                           <p className={styles.eyebrow}>Dane do odpowiedzi</p>
                           <h3>Osoba odpowiedzialna</h3>
                         </div>
-                        <button className={styles.textButton}>
-                          Zmień dopasowanie
+                        <button
+                          type="button"
+                          className={styles.textButton}
+                          onClick={rematch}
+                          disabled={matching}
+                        >
+                          {matching ? "Dopasowuję…" : "Zmień dopasowanie"}
                         </button>
                       </div>
                       <div className={styles.formGrid}>
                         <Field
                           label="Nazwa / imię i nazwisko"
-                          value={
-                            selected.customer === "—"
-                              ? "Brak dopasowania"
-                              : selected.customer
+                          value={draft.responsibleName}
+                          onChange={(value) =>
+                            setDraft((current) => ({
+                              ...current,
+                              responsibleName: value,
+                            }))
                           }
                           wide
-                          warning={selected.customer === "—"}
+                          warning={!draft.responsibleName}
                         />
                         <Field
                           label="NIP / PESEL"
-                          value={
-                            selected.customer.includes("Sp. z o.o.")
-                              ? "521•••••••7"
-                              : "850••••••••"
+                          value={draft.responsibleTaxId}
+                          onChange={(value) =>
+                            setDraft((current) => ({
+                              ...current,
+                              responsibleTaxId: value,
+                            }))
                           }
                         />
-                        <Field label="E-mail" value="biuro@klient.pl" />
+                        <Field
+                          label="E-mail"
+                          value={draft.responsibleEmail}
+                          onChange={(value) =>
+                            setDraft((current) => ({
+                              ...current,
+                              responsibleEmail: value,
+                            }))
+                          }
+                        />
                       </div>
                     </section>
+                    {saveError && (
+                      <p className={styles.uploadError}>{saveError}</p>
+                    )}
                     <div className={styles.formFooter}>
-                      <span>Ostatni zapis: dziś, 09:22</span>
+                      <span>
+                        {selected.resolvedAt
+                          ? `Zrealizowano: ${new Date(selected.resolvedAt).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                          : selected.confirmedAt
+                            ? `Zatwierdzono: ${new Date(selected.confirmedAt).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                            : "Jeszcze niezatwierdzone"}
+                      </span>
                       <div>
-                        <button className={styles.secondaryButton}>
-                          Oznacz do wyjaśnienia
-                        </button>
+                        {selected.confirmedAt && !selected.resolvedAt && (
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            onClick={markResolved}
+                            disabled={resolving}
+                          >
+                            {resolving ? "Zapisuję…" : "Oznacz jako zrealizowaną"}
+                          </button>
+                        )}
                         <button
+                          type="button"
                           className={styles.primaryButton}
                           onClick={handleSave}
+                          disabled={saving}
                         >
                           {saved ? <Check size={18} /> : null}
-                          {saved ? "Zapisano" : "Zatwierdź dane"}
+                          {saving ? "Zapisuję…" : saved ? "Zapisano" : "Zatwierdź dane"}
                         </button>
                       </div>
                     </div>
@@ -1349,12 +1664,16 @@ function Field({
   wide = false,
   confident = false,
   warning = false,
+  onChange,
+  disabled = false,
 }: {
   label: string;
   value: string;
   wide?: boolean;
   confident?: boolean;
   warning?: boolean;
+  onChange?: (value: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className={`${styles.field} ${wide ? styles.fieldWide : ""}`}>
@@ -1364,10 +1683,20 @@ function Field({
           <CheckCircle2 size={14} aria-label="Wysoka pewność odczytu" />
         )}
       </span>
-      <input
-        defaultValue={value}
-        className={warning ? styles.inputWarning : ""}
-      />
+      {onChange ? (
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
+          className={warning ? styles.inputWarning : ""}
+        />
+      ) : (
+        <input
+          defaultValue={value}
+          disabled={disabled}
+          className={warning ? styles.inputWarning : ""}
+        />
+      )}
     </label>
   );
 }

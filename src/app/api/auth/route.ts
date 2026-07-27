@@ -85,6 +85,9 @@ export async function GET(request: Request) {
     role: member.role,
     organizationId: member.organizationId,
     email: member.email,
+    firstName: member.firstName,
+    lastName: member.lastName,
+    userId: member.userId,
   });
 }
 
@@ -133,6 +136,10 @@ export async function POST(request: Request) {
     email?: string;
     password?: string;
     companyName?: string;
+    firstName?: string;
+    lastName?: string;
+    phone?: string;
+    consent?: boolean;
   } | null;
   const email = body?.email?.trim().toLowerCase() ?? "";
   const password = body?.password ?? "";
@@ -149,13 +156,41 @@ export async function POST(request: Request) {
     );
 
   const signingUp = body?.action === "sign-up";
+  const firstName = body?.firstName?.trim() ?? "";
+  const lastName = body?.lastName?.trim() ?? "";
+  const phone = body?.phone?.trim() ?? "";
+  if (signingUp) {
+    if (!firstName || !lastName || !phone)
+      return NextResponse.json(
+        { error: "Podaj imię, nazwisko i numer telefonu." },
+        { status: 422 },
+      );
+    if (!body?.consent)
+      return NextResponse.json(
+        { error: "Musisz zaakceptować politykę prywatności." },
+        { status: 422 },
+      );
+  }
   const authUrl = signingUp
     ? `${url}/auth/v1/signup`
     : `${url}/auth/v1/token?grant_type=password`;
   const authResponse = await fetch(authUrl, {
     method: "POST",
     headers: { apikey: publishableKey, "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify(
+      signingUp
+        ? {
+            email,
+            password,
+            data: {
+              first_name: firstName,
+              last_name: lastName,
+              phone,
+              privacy_consent_at: new Date().toISOString(),
+            },
+          }
+        : { email, password },
+    ),
     cache: "no-store",
   });
   const authData = (await authResponse

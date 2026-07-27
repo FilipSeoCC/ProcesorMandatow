@@ -77,6 +77,13 @@ alter table public.mandate_documents add column if not exists sender text;
 alter table public.mandate_documents add column if not exists extraction_confidence jsonb not null default '{}'::jsonb;
 alter table public.mandate_documents add column if not exists ocr_error text not null default '';
 alter table public.mandate_documents add column if not exists processed_at timestamptz;
+alter table public.mandate_documents add column if not exists responsible_name text not null default '';
+alter table public.mandate_documents add column if not exists responsible_tax_id text not null default '';
+alter table public.mandate_documents add column if not exists responsible_email text not null default '';
+alter table public.mandate_documents add column if not exists confirmed_at timestamptz;
+alter table public.mandate_documents add column if not exists confirmed_by uuid references auth.users(id) on delete set null;
+alter table public.mandate_documents add column if not exists resolved_at timestamptz;
+alter table public.mandate_documents add column if not exists resolved_by uuid references auth.users(id) on delete set null;
 create table if not exists public.mandate_document_pages (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   document_id uuid not null, page_number integer not null check(page_number between 1 and 10), storage_path text not null unique,
@@ -152,6 +159,19 @@ create policy document_pages_read on public.mandate_document_pages for select us
 create policy document_pages_write on public.mandate_document_pages for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
 create policy audit_read on public.audit_events for select using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());
+
+do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane'); exception when duplicate_object then null; end $$;
+create table if not exists public.bug_reports (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  reporter_id uuid not null references auth.users(id) on delete cascade, reporter_email text not null default '',
+  description text not null, context text not null default '', status public.bug_report_status not null default 'nowe',
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+alter table public.bug_reports enable row level security;
+drop policy if exists bug_reports_read on public.bug_reports; drop policy if exists bug_reports_insert on public.bug_reports; drop policy if exists bug_reports_update on public.bug_reports;
+create policy bug_reports_read on public.bug_reports for select using(public.has_org_role(organization_id,array['admin']::public.app_role[]));
+create policy bug_reports_insert on public.bug_reports for insert with check(public.is_org_member(organization_id) and reporter_id=auth.uid());
+create policy bug_reports_update on public.bug_reports for update using(public.has_org_role(organization_id,array['admin']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin']::public.app_role[]));
 
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('mandate-documents','mandate-documents',false,15728640,array['application/pdf','image/jpeg','image/png','image/tiff','image/heic','image/heif'])

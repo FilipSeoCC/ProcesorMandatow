@@ -104,6 +104,29 @@
 .card input:focus {
   border-color: #2563eb;
 }
+.consentLabel {
+  display: flex !important;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #64748b !important;
+  line-height: 1.5;
+}
+.consentLabel input {
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  margin-top: 1px;
+  flex-shrink: 0;
+  accent-color: #2563eb;
+}
+.consentLabel a {
+  color: #2563eb;
+  font-weight: 700;
+  text-decoration: underline;
+}
 .submit {
   min-height: 52px;
   border-radius: 11px;
@@ -156,6 +179,100 @@
 .mobileLogout {
   display: none;
 }
+.reportBugButton {
+  position: fixed;
+  z-index: 45;
+  left: 14px;
+  bottom: 14px;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #172033;
+  box-shadow: 0 10px 24px #0f172a4d;
+  transform: translateZ(0);
+}
+.bugModalLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+}
+.bugModalBackdrop {
+  position: absolute;
+  inset: 0;
+  background: #101827a8;
+  backdrop-filter: blur(3px);
+}
+.bugModal {
+  position: relative;
+  width: min(100%, 440px);
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 30px 80px #0f172a55;
+}
+.bugModal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.bugModal header h2 {
+  font-size: 16px;
+}
+.bugModal header button {
+  color: #8a97a9;
+}
+.bugModal label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #5c6a7f;
+}
+.bugModal textarea {
+  border: 1px solid #dce3ec;
+  border-radius: 10px;
+  padding: 10px 11px;
+  font: inherit;
+  font-size: 12px;
+  color: #1c2534;
+  resize: vertical;
+}
+.bugError {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #c0392b;
+  font-weight: 600;
+}
+.bugSubmit {
+  margin-top: 14px;
+  width: 100%;
+  min-height: 44px;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 750;
+}
+.bugSubmit:disabled {
+  opacity: 0.7;
+}
+.bugSent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 4px;
+  color: #16845b;
+  font-size: 12px;
+  font-weight: 700;
+}
 @keyframes spin {
   to {
     transform: rotate(360deg);
@@ -185,6 +302,11 @@
     transform: translateZ(0);
     -webkit-transform: translateZ(0);
     will-change: transform;
+  }
+}
+@media (max-width: 760px) {
+  .reportBugButton {
+    bottom: calc(80px + env(safe-area-inset-bottom));
   }
 }
 @media (prefers-reduced-motion: reduce) {

@@ -5,6 +5,8 @@ export type AppRole = "admin" | "dispatcher" | "office" | "scanner" | "viewer";
 export type VerifiedMember = {
   userId: string;
   email: string | null;
+  firstName: string | null;
+  lastName: string | null;
   organizationId: string;
   role: AppRole;
   accessToken: string;
@@ -37,6 +39,7 @@ export async function verifyMember(
   const user = (await userResponse.json()) as {
     id?: string;
     email?: string;
+    user_metadata?: { first_name?: string; last_name?: string };
   };
   if (!user.id) return null;
 
@@ -58,6 +61,8 @@ export async function verifyMember(
   return {
     userId: user.id,
     email: user.email ?? null,
+    firstName: user.user_metadata?.first_name ?? null,
+    lastName: user.user_metadata?.last_name ?? null,
     organizationId: membership.organization_id,
     role: membership.role,
     accessToken,
