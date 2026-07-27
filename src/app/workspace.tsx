@@ -215,6 +215,7 @@ export default function MandatyWorkspace() {
   const [filter, setFilter] = useState<"Wszystkie" | CaseStatus>("Wszystkie");
   const [scanOpen, setScanOpen] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const [uploadedPages, setUploadedPages] = useState<UploadPage[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
@@ -1082,6 +1083,7 @@ export default function MandatyWorkspace() {
                     onClick={() => {
                       setSelectedId(item.id);
                       setActiveView("cases");
+                      setMobileDetailOpen(true);
                     }}
                   >
                     <span className={styles.documentThumb}>
@@ -1188,7 +1190,10 @@ export default function MandatyWorkspace() {
                     <button
                       key={item.id}
                       className={`${styles.caseItem} ${selectedId === item.id ? styles.caseSelected : ""}`}
-                      onClick={() => setSelectedId(item.id)}
+                      onClick={() => {
+                        setSelectedId(item.id);
+                        setMobileDetailOpen(true);
+                      }}
                     >
                       <span className={styles.caseItemTop}>
                         <strong className={styles.plate}>{item.plate}</strong>
@@ -1216,13 +1221,14 @@ export default function MandatyWorkspace() {
               </div>
 
               <div
-                className={styles.detailPanel}
+                className={`${styles.detailPanel} ${mobileDetailOpen ? styles.detailPanelOpen : ""}`}
                 key={`${selected.id}|${selected.plate}|${selected.eventAt}|${selected.sender}|${selected.ocrStatus}|${selected.customer}`}
               >
                 <div className={styles.detailHeader}>
                   <div className={styles.detailTitle}>
                     <button
                       className={`${styles.iconButton} ${styles.mobileOnly}`}
+                      onClick={() => setMobileDetailOpen(false)}
                       aria-label="Wróć do listy"
                     >
                       <ChevronLeft size={20} />
