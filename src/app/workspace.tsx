@@ -228,6 +228,8 @@ export default function MandatyWorkspace() {
   const [matchMessage, setMatchMessage] = useState<string | null>(null);
   const [matchOk, setMatchOk] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [caseMenuOpen, setCaseMenuOpen] = useState(false);
+  const [deletingCase, setDeletingCase] = useState(false);
   const [team, setTeam] = useState<
     Array<{ userId: string; role: string; email: string | null; name: string | null }>
   >([]);
@@ -273,6 +275,7 @@ export default function MandatyWorkspace() {
     setMatchMessage(null);
     setMatchOk(false);
     setSaveError(null);
+    setCaseMenuOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.id]);
 
@@ -622,7 +625,14 @@ export default function MandatyWorkspace() {
     try {
       const response = await fetch(
         `/api/documents/${selected.documentId}/match`,
-        { method: "POST" },
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            registrationNumber: draft.plate,
+            eventAt: draft.eventAt,
+          }),
+        },
       );
       const data = await response.json().catch(() => ({}));
       if (!response.ok)
@@ -668,6 +678,28 @@ export default function MandatyWorkspace() {
       );
     } finally {
       setResolving(false);
+    }
+  }
+
+  async function deleteCase() {
+    if (!selected.documentId || deletingCase) return;
+    if (
+      !window.confirm(
+        `Usunąć sprawę ${selected.id}? Tej operacji nie można cofnąć.`,
+      )
+    )
+      return;
+    setDeletingCase(true);
+    try {
+      const response = await fetch(`/api/documents/${selected.documentId}`, {
+        method: "DELETE",
+      });
+      if (response.ok) {
+        setCaseMenuOpen(false);
+        await loadDocuments(false);
+      }
+    } finally {
+      setDeletingCase(false);
     }
   }
 
@@ -1243,16 +1275,28 @@ export default function MandatyWorkspace() {
                     </div>
                   </div>
                   <div className={styles.detailActions}>
-                    <span className={styles.deadline}>
-                      <Clock3 size={15} />
-                      Termin: {selected.deadline}
-                    </span>
-                    <button
-                      className={styles.moreButton}
-                      aria-label="Więcej opcji"
-                    >
-                      <MoreHorizontal size={20} />
-                    </button>
+                    <div className={styles.caseMenuWrap}>
+                      <button
+                        className={styles.moreButton}
+                        onClick={() => setCaseMenuOpen((current) => !current)}
+                        aria-label="Więcej opcji"
+                      >
+                        <MoreHorizontal size={20} />
+                      </button>
+                      {caseMenuOpen && (
+                        <div className={styles.caseMenu} role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={!selected.documentId || deletingCase}
+                            onClick={deleteCase}
+                          >
+                            <Trash2 size={15} />
+                            {deletingCase ? "Usuwam…" : "Usuń sprawę"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -1314,20 +1358,22 @@ export default function MandatyWorkspace() {
                         <Field
                           label="Numer rejestracyjny"
                           value={draft.plate}
-                          onChange={(value) =>
-                            setDraft((current) => ({ ...current, plate: value }))
-                          }
+                          onChange={(value) => {
+                            setDraft((current) => ({ ...current, plate: value }));
+                            setMatchMessage(null);
+                          }}
                           confident
                         />
                         <Field
                           label="Data i godzina zdarzenia"
                           value={draft.eventAt}
-                          onChange={(value) =>
+                          onChange={(value) => {
                             setDraft((current) => ({
                               ...current,
                               eventAt: value,
-                            }))
-                          }
+                            }));
+                            setMatchMessage(null);
+                          }}
                           confident
                         />
                         <Field label="Numer sprawy" value={selected.id} />

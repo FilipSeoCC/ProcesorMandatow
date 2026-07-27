@@ -449,6 +449,39 @@
 .accountMenu button:hover {
   background: #f4f7fb;
 }
+.caseMenuWrap {
+  position: relative;
+}
+.caseMenu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 170px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 14px 34px #0f172a3d;
+  overflow: hidden;
+  z-index: 30;
+}
+.caseMenu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px 13px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #c0392b;
+  text-align: left;
+}
+.caseMenu button:hover {
+  background: #fff5f5;
+}
+.caseMenu button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
 .settingsField {
   padding: 11px 0;
   border-bottom: 1px solid var(--line);
@@ -545,6 +578,9 @@
   place-items: center;
   box-shadow: 0 6px 18px #0f172a4d;
   opacity: 0.85;
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  will-change: transform;
 }
 .documentsGrid {
   display: grid;

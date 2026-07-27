@@ -32,12 +32,25 @@ export async function POST(
   if (!docResponse.ok || !document)
     return NextResponse.json({ error: "Nie znaleziono sprawy." }, { status: 404 });
 
+  // Prefer whatever the reviewer currently has typed in the form over the
+  // last-saved DB value — otherwise "Zmien dopasowanie" silently re-matches
+  // stale data whenever the edit hasn't been confirmed yet.
+  const body = await request.json().catch(() => null);
+  const registrationNumber =
+    typeof body?.registrationNumber === "string" && body.registrationNumber.trim()
+      ? body.registrationNumber.trim()
+      : document.registration_number;
+  const eventAt =
+    typeof body?.eventAt === "string" && body.eventAt.trim()
+      ? body.eventAt.trim()
+      : document.event_at;
+
   const result = await matchVehicleCustomer(
     url,
     secretKey,
     member.organizationId,
-    document.registration_number,
-    document.event_at,
+    registrationNumber,
+    eventAt,
   );
   return NextResponse.json(result);
 }

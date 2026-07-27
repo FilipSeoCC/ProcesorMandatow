@@ -9,18 +9,11 @@ export type Employee = {
   name: string;
   phone: string;
   email: string;
-  license: string;
-  licenseUntil: string;
   status: "Dostępny" | "W trasie" | "Urlop" | "Nieaktywny";
 };
 
 function normalize(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
-
-function formatDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium" }).format(date);
 }
 
 const statusClass: Record<Employee["status"], string> = {
@@ -35,8 +28,6 @@ const emptyForm = {
   lastName: "",
   phone: "",
   email: "",
-  license: "",
-  licenseUntil: "",
   status: "Dostępny" as Employee["status"],
 };
 
@@ -50,7 +41,6 @@ export default function Employees() {
   const [saving, setSaving] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [now] = useState(() => Date.now());
   const [form, setForm] = useState(emptyForm);
 
   async function loadEmployees() {
@@ -97,8 +87,6 @@ export default function Employees() {
       lastName: rest.join(" "),
       phone: employee.phone,
       email: employee.email,
-      license: employee.license,
-      licenseUntil: employee.licenseUntil,
       status: employee.status,
     });
     setError(null);
@@ -109,9 +97,8 @@ export default function Employees() {
     const firstName = form.firstName.trim();
     const lastName = form.lastName.trim();
     const phone = form.phone.trim();
-    const license = form.license.trim();
-    if (!firstName || !lastName || !phone || !license || !form.licenseUntil) {
-      setError("Uzupełnij imię, nazwisko, telefon, numer i datę ważności prawa jazdy.");
+    if (!firstName || !lastName || !phone) {
+      setError("Uzupełnij imię, nazwisko i telefon.");
       return;
     }
     const name = `${firstName} ${lastName}`;
@@ -120,10 +107,6 @@ export default function Employees() {
       employees.some((employee) => normalize(employee.name) === normalize(name))
     ) {
       setError("Pracownik o tym imieniu i nazwisku już istnieje.");
-      return;
-    }
-    if (!editingId && new Date(form.licenseUntil) < new Date()) {
-      setError("Data ważności prawa jazdy musi przypadać w przyszłości.");
       return;
     }
     setSaving(true);
@@ -138,8 +121,6 @@ export default function Employees() {
           lastName,
           phone,
           email: form.email.trim(),
-          license,
-          licenseUntil: form.licenseUntil,
           status: form.status,
         }),
       });
@@ -193,15 +174,8 @@ export default function Employees() {
             <CircleAlert size={21} />
           </span>
           <div>
-            <small>Prawo jazdy wygasa &lt;60 dni</small>
-            <strong>
-              {
-                employees.filter((employee) => {
-                  const days = (new Date(employee.licenseUntil).getTime() - now) / 86_400_000;
-                  return days >= 0 && days <= 60;
-                }).length
-              }
-            </strong>
+            <small>Nieaktywni</small>
+            <strong>{employees.filter((employee) => employee.status === "Nieaktywny").length}</strong>
           </div>
         </article>
       </section>
@@ -234,7 +208,6 @@ export default function Employees() {
               <tr>
                 <th>Pracownik</th>
                 <th>Kontakt</th>
-                <th>Prawo jazdy</th>
                 <th>Status</th>
                 <th />
               </tr>
@@ -250,11 +223,6 @@ export default function Employees() {
                     {employee.phone}
                     <br />
                     <span>{employee.email || "Brak e-maila"}</span>
-                  </td>
-                  <td>
-                    <code>{employee.license}</code>
-                    <br />
-                    <span>ważne do {formatDate(employee.licenseUntil)}</span>
                   </td>
                   <td>
                     <span className={statusClass[employee.status]}>{employee.status}</span>
@@ -311,7 +279,6 @@ export default function Employees() {
               </div>
               <h3>{employee.name}</h3>
               <p>{employee.email || "Brak e-maila"}</p>
-              <small>Prawo jazdy ważne do {formatDate(employee.licenseUntil)}</small>
             </article>
           ))}
         </div>
@@ -327,7 +294,7 @@ export default function Employees() {
             <header>
               <div>
                 <span>Struktura zespołu</span>
-                <h2 id="employee-add-title">{editingId ? "Edytuj kierowcę" : "Dodaj kierowcę"}</h2>
+                <h2 id="employee-add-title">{editingId ? "Edytuj pracownika" : "Dodaj pracownika"}</h2>
               </div>
               <button onClick={() => setAddOpen(false)} aria-label="Zamknij">
                 <X size={21} />
@@ -349,14 +316,6 @@ export default function Employees() {
               <label>
                 Adres e-mail
                 <input type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} placeholder="adam@firma.pl" />
-              </label>
-              <label>
-                Numer prawa jazdy
-                <input value={form.license} onChange={(event) => setForm((current) => ({ ...current, license: event.target.value }))} placeholder="00000/00/0000" />
-              </label>
-              <label>
-                Ważne do
-                <input type="date" value={form.licenseUntil} onChange={(event) => setForm((current) => ({ ...current, licenseUntil: event.target.value }))} />
               </label>
               <label>
                 Status
@@ -382,7 +341,7 @@ export default function Employees() {
                 Anuluj
               </button>
               <button className={styles.confirm} disabled={saving} onClick={saveEmployee}>
-                {saving ? "Zapisuję…" : editingId ? "Zapisz zmiany" : "Dodaj kierowcę"}
+                {saving ? "Zapisuję…" : editingId ? "Zapisz zmiany" : "Dodaj pracownika"}
               </button>
             </footer>
           </section>

@@ -30,8 +30,6 @@ function toDriver(row: DriverRow) {
     name: `${row.first_name} ${row.last_name}`.trim(),
     phone: row.phone,
     email: row.email,
-    license: row.license_number,
-    licenseUntil: row.license_valid_until ?? "",
     status: row.status,
   };
 }
@@ -69,20 +67,12 @@ export async function POST(request: Request) {
   const lastName = text(body?.lastName, 100);
   const phone = text(body?.phone, 30);
   const email = text(body?.email, 200);
-  const license = text(body?.license, 40);
-  const licenseUntilRaw = text(body?.licenseUntil, 20);
   const status = validStatuses.has(text(body?.status, 20))
     ? text(body?.status, 20)
     : "Dostępny";
-  if (!firstName || !lastName || !phone || !license || !licenseUntilRaw)
+  if (!firstName || !lastName || !phone)
     return NextResponse.json(
-      { error: "Uzupełnij imię, nazwisko, telefon, numer i datę ważności prawa jazdy." },
-      { status: 422 },
-    );
-  const licenseUntil = new Date(licenseUntilRaw);
-  if (Number.isNaN(licenseUntil.valueOf()))
-    return NextResponse.json(
-      { error: "Nieprawidłowa data ważności prawa jazdy." },
+      { error: "Uzupełnij imię, nazwisko i telefon." },
       { status: 422 },
     );
   const { url, secretKey } = getSupabaseServerEnv();
@@ -101,8 +91,6 @@ export async function POST(request: Request) {
     last_name: lastName,
     phone,
     email,
-    license_number: license,
-    license_valid_until: licenseUntilRaw,
     status,
   };
 

@@ -64,3 +64,45 @@ export async function PATCH(
     );
   return NextResponse.json({ ok: true });
 }
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const member = await verifyMember(request, ["admin", "office", "scanner"]);
+  if (!member)
+    return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
+  const { url, secretKey } = getSupabaseServerEnv();
+  if (!url || !secretKey)
+    return NextResponse.json(
+      { error: "Supabase nie jest skonfigurowany." },
+      { status: 503 },
+    );
+  const headers = adminHeaders(secretKey);
+
+  const pagesResponse = await fetch(
+    `${url}/rest/v1/mandate_document_pages?select=storage_path&document_id=eq.${encodeURIComponent(id)}&organization_id=eq.${member.organizationId}`,
+    { headers, cache: "no-store" },
+  );
+  const pages = pagesResponse.ok
+    ? ((await pagesResponse.json()) as Array<{ storage_path: string }>)
+    : [];
+  if (pages.length)
+    await fetch(`${url}/storage/v1/object/mandate-documents`, {
+      method: "DELETE",
+      headers: { ...headers, "Content-Type": "application/json" },
+      body: JSON.stringify({ prefixes: pages.map((page) => page.storage_path) }),
+    }).catch(() => null);
+
+  const response = await fetch(
+    `${url}/rest/v1/mandate_documents?id=eq.${encodeURIComponent(id)}&organization_id=eq.${member.organizationId}`,
+    { method: "DELETE", headers },
+  );
+  if (!response.ok)
+    return NextResponse.json(
+      { error: "Nie udało się usunąć sprawy." },
+      { status: 502 },
+    );
+  return NextResponse.json({ ok: true });
+}
