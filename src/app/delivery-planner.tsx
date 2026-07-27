@@ -80,6 +80,8 @@ export default function DeliveryPlanner() {
   const [routeDirty, setRouteDirty] = useState(false);
   const [completedIds, setCompletedIds] = useState<string[]>([]);
   const [failedIds, setFailedIds] = useState<string[]>([]);
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [stopIdByDelivery, setStopIdByDelivery] = useState<Record<string, string>>({});
   const [draftReady, setDraftReady] = useState(false);
   const [pendingAction, setPendingAction] = useState<
     "complete" | "failed" | null
@@ -110,6 +112,12 @@ export default function DeliveryPlanner() {
         );
         setFailedIds(Array.isArray(draft.failedIds) ? draft.failedIds : []);
         setRouteDirty(Boolean(draft.routeDirty));
+        setPlanId(typeof draft.planId === "string" ? draft.planId : null);
+        setStopIdByDelivery(
+          draft.stopIdByDelivery && typeof draft.stopIdByDelivery === "object"
+            ? draft.stopIdByDelivery
+            : {},
+        );
       }
     } catch {}
     setDraftReady(true);
@@ -127,9 +135,11 @@ export default function DeliveryPlanner() {
           completedIds,
           failedIds,
           routeDirty,
+          planId,
+          stopIdByDelivery,
         }),
       );
-  }, [completedIds, draftReady, failedIds, result, routeDirty, selected]);
+  }, [completedIds, draftReady, failedIds, planId, result, routeDirty, selected, stopIdByDelivery]);
 
   useEffect(() => {
     let cancelled = false;
@@ -216,6 +226,8 @@ export default function DeliveryPlanner() {
       setSelected((current) => [...current, created.id]);
       setResult(null);
       setRouteDirty(false);
+      setPlanId(null);
+      setStopIdByDelivery({});
       setAddForm({
         customer: "",
         vehicle: "",
@@ -257,11 +269,15 @@ export default function DeliveryPlanner() {
     setSelected((current) => current.filter((item) => item !== id));
     setResult(null);
     setRouteDirty(false);
+    setPlanId(null);
+    setStopIdByDelivery({});
   }
 
   function toggle(id: string) {
     setResult(null);
     setRouteDirty(false);
+    setPlanId(null);
+    setStopIdByDelivery({});
     setSelected((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
@@ -287,9 +303,28 @@ export default function DeliveryPlanner() {
   }
   function confirmStopAction() {
     if (!currentStop || !pendingAction) return;
-    if (pendingAction === "complete")
+    const status = pendingAction === "complete" ? "completed" : "failed";
+    if (status === "completed")
       setCompletedIds((current) => [...current, currentStop.id]);
     else setFailedIds((current) => [...current, currentStop.id]);
+    const stopId = stopIdByDelivery[currentStop.id];
+    if (planId && stopId) {
+      const token = storedAccessToken();
+      fetch(
+        `/api/routes/plans/${encodeURIComponent(planId)}/stops/${encodeURIComponent(stopId)}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            status,
+            notes: status === "failed" ? failureReason : "",
+          }),
+        },
+      ).catch((reason) => console.error("Nie udało się zapisać postępu przystanku", reason));
+    }
     setPendingAction(null);
   }
   function postponeCurrent() {
@@ -332,6 +367,41 @@ export default function DeliveryPlanner() {
       setCompletedIds([]);
       setFailedIds([]);
       setRouteDirty(false);
+      setPlanId(null);
+      setStopIdByDelivery({});
+      try {
+        const planResponse = await fetch("/api/routes/plans", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            startAddress: depot.address,
+            startLatitude: depot.latitude,
+            startLongitude: depot.longitude,
+            distanceMeters: Math.round(data.distanceKm * 1000),
+            durationSeconds: Math.round(data.durationMinutes * 60),
+            optimizationSource: data.mode,
+            stops: (data.orderedStopIds as string[]).map(
+              (deliveryOrderId, index) => ({ deliveryOrderId, position: index + 1 }),
+            ),
+          }),
+        });
+        const planData = await planResponse.json();
+        if (planResponse.ok) {
+          setPlanId(planData.planId);
+          setStopIdByDelivery(
+            Object.fromEntries(
+              (planData.stops as Array<{ deliveryOrderId: string; stopId: string }>).map(
+                (stop) => [stop.deliveryOrderId, stop.stopId],
+              ),
+            ),
+          );
+        }
+      } catch (reason) {
+        console.error("Nie udało się zapisać planu trasy", reason);
+      }
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -708,6 +778,8 @@ export default function DeliveryPlanner() {
                 setResult(null);
                 setCompletedIds([]);
                 setFailedIds([]);
+                setPlanId(null);
+                setStopIdByDelivery({});
                 localStorage.removeItem(routeDraftKey);
               }}
             >
@@ -784,8 +856,8 @@ export default function DeliveryPlanner() {
                   </button>
                 </div>
                 <small>
-                  Postęp zostanie zachowany na tym telefonie. Zapis centralny
-                  uruchomi się po podłączeniu Supabase.
+                  Postęp zostanie zachowany na tym telefonie i zsynchronizowany
+                  z centralnym systemem.
                 </small>
               </section>
             </div>
