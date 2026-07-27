@@ -27,8 +27,10 @@ import {
   UserRound,
   UsersRound,
   X,
+  XCircle,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import DeliveryPlanner from "./delivery-planner";
 import FleetManager from "./fleet-manager";
 import MobileCapture from "./mobile-capture";
 import styles from "./workspace.module.css";
@@ -130,10 +132,16 @@ const statusClass: Record<CaseStatus, string> = {
 
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<
-    "cases" | "fleet" | "documents"
+    "cases" | "fleet" | "documents" | "routes"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [desktopMode, setDesktopMode] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [toast, setToast] = useState<{
+    id: number;
+    success: boolean;
+    message: string;
+  } | null>(null);
   const [caseItems, setCaseItems] = useState<CaseItem[]>(demoCases);
   const [selectedId, setSelectedId] = useState(demoCases[0].id);
   const [query, setQuery] = useState("");
@@ -204,6 +212,27 @@ export default function MandatyWorkspace() {
       ocrStatus: document.status,
       ocrText: document.ocr_text,
     }));
+    const justFinished = mapped.find((item) => {
+      const prior = caseItems.find((existing) => existing.id === item.id);
+      return (
+        prior?.ocrStatus &&
+        pendingOcrStatuses.has(prior.ocrStatus) &&
+        item.ocrStatus &&
+        !pendingOcrStatuses.has(item.ocrStatus)
+      );
+    });
+    if (justFinished) {
+      const success =
+        justFinished.ocrStatus === "ready" ||
+        justFinished.ocrStatus === "needs_review";
+      setToast({
+        id: Date.now(),
+        success,
+        message: success
+          ? `OCR zakończony sukcesem: ${justFinished.id}`
+          : `Analiza OCR nie powiodła się: ${justFinished.id}`,
+      });
+    }
     setCaseItems(mapped);
     setSelectedId((current) =>
       preserveSelection && mapped.some((item) => item.id === current)
@@ -250,6 +279,12 @@ export default function MandatyWorkspace() {
       desktopMode ? "width=1280" : "width=device-width, initial-scale=1",
     );
   }, [desktopMode]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   function handleFiles(event: ChangeEvent<HTMLInputElement>) {
     const selectedFiles = Array.from(event.target.files ?? []);
@@ -380,10 +415,17 @@ export default function MandatyWorkspace() {
           </button>
         </div>
         <nav className={styles.nav}>
-          <a href="#" className={styles.navItem}>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView("routes");
+              setMobileMenu(false);
+            }}
+            className={`${styles.navItem} ${activeView === "routes" ? styles.navActive : ""}`}
+          >
             <LayoutDashboard size={19} />
-            Pulpit
-          </a>
+            Planer tras
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -457,11 +499,17 @@ export default function MandatyWorkspace() {
                 ? "Obsługa mandatów"
                 : activeView === "documents"
                   ? "Dokumenty"
-                  : "Zarządzanie flotą"}
+                  : activeView === "routes"
+                    ? "Planer tras"
+                    : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
-            <button className={styles.helpButton}>
+            <button
+              type="button"
+              className={styles.helpButton}
+              onClick={() => setHelpOpen(true)}
+            >
               <CircleHelp size={18} />
               Pomoc
             </button>
@@ -477,7 +525,7 @@ export default function MandatyWorkspace() {
                 <Upload size={18} />
                 Importuj flotę
               </button>
-            ) : (
+            ) : activeView === "routes" ? null : (
               <button
                 className={styles.primaryButton}
                 onClick={() => setScanOpen(true)}
@@ -494,6 +542,8 @@ export default function MandatyWorkspace() {
             importOpen={fleetImportOpen}
             onCloseImport={() => setFleetImportOpen(false)}
           />
+        ) : activeView === "routes" ? (
+          <DeliveryPlanner />
         ) : activeView === "documents" ? (
           <section className={styles.documentsGrid} aria-label="Wszystkie dokumenty">
             {caseItems.length === 0 ? (
@@ -815,7 +865,7 @@ export default function MandatyWorkspace() {
           <Upload size={21} />
           Importuj flotę
         </button>
-      ) : (
+      ) : activeView === "routes" ? null : (
         <button
           className={styles.mobileScanButton}
           onClick={() => setScanOpen(true)}
@@ -836,6 +886,86 @@ export default function MandatyWorkspace() {
       >
         {desktopMode ? <Smartphone size={17} /> : <Monitor size={17} />}
       </button>
+
+      {toast && (
+        <div
+          className={`${styles.toast} ${toast.success ? styles.toastSuccess : styles.toastError}`}
+          role="status"
+        >
+          {toast.success ? (
+            <CheckCircle2 size={18} />
+          ) : (
+            <XCircle size={18} />
+          )}
+          <span>{toast.message}</span>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            aria-label="Zamknij powiadomienie"
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {helpOpen && (
+        <div
+          className={styles.modalLayer}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="help-title"
+        >
+          <button
+            className={styles.modalBackdrop}
+            onClick={() => setHelpOpen(false)}
+            aria-label="Zamknij okno"
+          />
+          <div className={styles.helpModal}>
+            <header>
+              <div>
+                <span>FlotaFlow</span>
+                <h2 id="help-title">Czym jest ta aplikacja</h2>
+              </div>
+              <button onClick={() => setHelpOpen(false)} aria-label="Zamknij">
+                <X size={21} />
+              </button>
+            </header>
+            <p>
+              FlotaFlow automatyzuje obsługę mandatów i wezwań trafiających do
+              właściciela floty, mimo że w danym momencie z auta korzystał
+              klient. Aplikacja rozpoznaje dane z przesłanego skanu (OCR),
+              dopasowuje pojazd i klienta, i prowadzi sprawę aż do wysłania
+              wezwania.
+            </p>
+            <ul>
+              <li>
+                <strong>Sprawy</strong> — kolejka dokumentów: sprawdzasz odczyt
+                OCR, poprawiasz dane i zatwierdzasz sprawę.
+              </li>
+              <li>
+                <strong>Dokumenty</strong> — pełna lista wszystkich
+                zeskanowanych dokumentów, niezależnie od statusu.
+              </li>
+              <li>
+                <strong>Flota</strong> — kartoteka pojazdów i ich aktualnych
+                użytkowników, import z CSV/XML.
+              </li>
+              <li>
+                <strong>Planer tras</strong> — układanie kolejności dostaw i
+                odbiorów aut przy użyciu Google Maps.
+              </li>
+            </ul>
+            <footer>
+              <button
+                className={styles.primaryButton}
+                onClick={() => setHelpOpen(false)}
+              >
+                Rozumiem
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
 
       {scanOpen && (
         <div

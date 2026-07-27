@@ -12,9 +12,12 @@ import {
   LoaderCircle,
   MapPin,
   Navigation,
+  Plus,
   RotateCcw,
   Route,
   Sparkles,
+  Trash2,
+  X,
   XCircle,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -100,13 +103,23 @@ function storedAccessToken() {
 }
 
 export default function DeliveryPlanner() {
-  const [deliveries] = useState(initialDeliveries);
+  const [deliveries, setDeliveries] = useState(initialDeliveries);
   const [selected, setSelected] = useState<string[]>(
     initialDeliveries.map((item) => item.id),
   );
   const [result, setResult] = useState<Optimization | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({
+    customer: "",
+    vehicle: "",
+    address: "",
+    serviceMinutes: "20",
+    priority: "3",
+  });
+  const [geocoding, setGeocoding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
   const [routeDirty, setRouteDirty] = useState(false);
   const [completedIds, setCompletedIds] = useState<string[]>([]);
   const [failedIds, setFailedIds] = useState<string[]>([]);
@@ -160,6 +173,75 @@ export default function DeliveryPlanner() {
         }),
       );
   }, [completedIds, draftReady, failedIds, result, routeDirty, selected]);
+
+  async function addDelivery() {
+    const customer = addForm.customer.trim();
+    const address = addForm.address.trim();
+    const serviceMinutes = Number(addForm.serviceMinutes);
+    const priority = Number(addForm.priority);
+    if (!customer || !address) {
+      setAddError("Podaj klienta i adres dostawy.");
+      return;
+    }
+    if (!Number.isFinite(serviceMinutes) || serviceMinutes < 0 || serviceMinutes > 240) {
+      setAddError("Czas obsługi musi być liczbą od 0 do 240 minut.");
+      return;
+    }
+    setGeocoding(true);
+    setAddError(null);
+    try {
+      const token = storedAccessToken();
+      const response = await fetch("/api/routes/geocode", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ address }),
+      });
+      const data = await response.json();
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się znaleźć adresu.");
+      const id = `DST-${Date.now().toString(36).toUpperCase()}`;
+      setDeliveries((current) => [
+        ...current,
+        {
+          id,
+          vehicle: addForm.vehicle.trim() || "Nieprzypisany",
+          customer,
+          address: data.formattedAddress || address,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          serviceMinutes,
+          priority: Math.min(5, Math.max(1, priority || 3)),
+        },
+      ]);
+      setSelected((current) => [...current, id]);
+      setResult(null);
+      setRouteDirty(false);
+      setAddForm({
+        customer: "",
+        vehicle: "",
+        address: "",
+        serviceMinutes: "20",
+        priority: "3",
+      });
+      setAddOpen(false);
+    } catch (reason) {
+      setAddError(
+        reason instanceof Error ? reason.message : "Nie udało się dodać dostawy.",
+      );
+    } finally {
+      setGeocoding(false);
+    }
+  }
+
+  function removeDelivery(id: string) {
+    setDeliveries((current) => current.filter((item) => item.id !== id));
+    setSelected((current) => current.filter((item) => item !== id));
+    setResult(null);
+    setRouteDirty(false);
+  }
 
   function toggle(id: string) {
     setResult(null);
@@ -286,33 +368,142 @@ export default function DeliveryPlanner() {
                 <h2>Auta do wydania</h2>
                 <p>Zaznacz dzisiejsze dostawy</p>
               </div>
-              <span>
-                {selected.length}/{deliveries.length}
-              </span>
+              <button
+                type="button"
+                className={styles.addStopButton}
+                onClick={() => {
+                  setAddOpen((current) => !current);
+                  setAddError(null);
+                }}
+              >
+                {addOpen ? <X size={16} /> : <Plus size={16} />}
+                Dodaj dostawę
+              </button>
             </header>
+            {addOpen && (
+              <div className={styles.addStopForm}>
+                <label>
+                  Klient
+                  <input
+                    value={addForm.customer}
+                    onChange={(event) =>
+                      setAddForm((current) => ({
+                        ...current,
+                        customer: event.target.value,
+                      }))
+                    }
+                    placeholder="Nazwa klienta"
+                  />
+                </label>
+                <label>
+                  Adres dostawy
+                  <input
+                    value={addForm.address}
+                    onChange={(event) =>
+                      setAddForm((current) => ({
+                        ...current,
+                        address: event.target.value,
+                      }))
+                    }
+                    placeholder="Ulica, numer, miasto"
+                  />
+                </label>
+                <label>
+                  Pojazd (opcjonalnie)
+                  <input
+                    value={addForm.vehicle}
+                    onChange={(event) =>
+                      setAddForm((current) => ({
+                        ...current,
+                        vehicle: event.target.value,
+                      }))
+                    }
+                    placeholder="Np. Ford Transit · WI 2847K"
+                  />
+                </label>
+                <div className={styles.addStopRow}>
+                  <label>
+                    Czas obsługi (min)
+                    <input
+                      type="number"
+                      min={0}
+                      max={240}
+                      value={addForm.serviceMinutes}
+                      onChange={(event) =>
+                        setAddForm((current) => ({
+                          ...current,
+                          serviceMinutes: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Priorytet (1-5)
+                    <input
+                      type="number"
+                      min={1}
+                      max={5}
+                      value={addForm.priority}
+                      onChange={(event) =>
+                        setAddForm((current) => ({
+                          ...current,
+                          priority: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
+                {addError && <p className={styles.error}>{addError}</p>}
+                <button
+                  type="button"
+                  className={styles.addStopSubmit}
+                  disabled={geocoding}
+                  onClick={addDelivery}
+                >
+                  {geocoding ? (
+                    <LoaderCircle className={styles.spin} size={17} />
+                  ) : (
+                    <Plus size={17} />
+                  )}
+                  {geocoding ? "Wyszukuję adres…" : "Dodaj do listy"}
+                </button>
+              </div>
+            )}
             <div className={styles.deliveryList}>
               {deliveries.map((delivery) => (
-                <button
+                <div
                   key={delivery.id}
                   className={`${styles.delivery} ${selected.includes(delivery.id) ? styles.selected : ""}`}
-                  onClick={() => toggle(delivery.id)}
                 >
-                  <span className={styles.checkbox}>
-                    {selected.includes(delivery.id) && <Check size={15} />}
-                  </span>
-                  <span className={styles.deliveryBody}>
-                    <strong>{delivery.vehicle}</strong>
-                    <b>{delivery.customer}</b>
-                    <small>
-                      <MapPin size={13} />
-                      {delivery.address}
-                    </small>
-                  </span>
-                  <span className={styles.duration}>
-                    <Clock3 size={13} />
-                    {delivery.serviceMinutes} min
-                  </span>
-                </button>
+                  <button
+                    className={styles.deliveryMain}
+                    onClick={() => toggle(delivery.id)}
+                  >
+                    <span className={styles.checkbox}>
+                      {selected.includes(delivery.id) && <Check size={15} />}
+                    </span>
+                    <span className={styles.deliveryBody}>
+                      <strong>{delivery.vehicle}</strong>
+                      <b>{delivery.customer}</b>
+                      <small>
+                        <MapPin size={13} />
+                        {delivery.address}
+                      </small>
+                    </span>
+                    <span className={styles.duration}>
+                      <Clock3 size={13} />
+                      {delivery.serviceMinutes} min
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.removeStop}
+                    onClick={() => removeDelivery(delivery.id)}
+                    aria-label={`Usuń dostawę ${delivery.customer}`}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               ))}
             </div>
           </section>

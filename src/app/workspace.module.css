@@ -392,6 +392,39 @@
 .caseList {
   overflow-y: auto;
 }
+.toast {
+  position: fixed;
+  z-index: 60;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: min(92vw, 420px);
+  padding: 12px 14px;
+  border-radius: 12px;
+  box-shadow: 0 14px 34px #0f172a3d;
+  font-size: 12px;
+  font-weight: 600;
+}
+.toast span {
+  flex: 1;
+}
+.toast button {
+  color: inherit;
+  opacity: 0.7;
+}
+.toastSuccess {
+  background: #e7f7ef;
+  color: var(--green);
+  border: 1px solid #bfe9d3;
+}
+.toastError {
+  background: #fdecec;
+  color: #c0392b;
+  border: 1px solid #f5c6c6;
+}
 .desktopModeToggle {
   position: fixed;
   right: 14px;
@@ -908,6 +941,61 @@
 }
 .modalHandle {
   display: none;
+}
+.helpModal {
+  position: relative;
+  width: min(100%, 480px);
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 18px;
+  padding: 22px;
+  box-shadow: 0 30px 80px #0f172a55;
+}
+.helpModal header {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  margin-bottom: 12px;
+}
+.helpModal header span {
+  font-size: 10px;
+  font-weight: 750;
+  color: var(--blue);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.helpModal header h2 {
+  font-size: 18px;
+  margin-top: 3px;
+}
+.helpModal header button {
+  color: #8a97a9;
+}
+.helpModal > p {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #4b5a6e;
+  margin-bottom: 16px;
+}
+.helpModal ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+.helpModal li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #4b5a6e;
+}
+.helpModal li strong {
+  color: var(--ink);
+}
+.helpModal footer {
+  display: flex;
+  justify-content: flex-end;
 }
 .modalHeader {
   display: flex;

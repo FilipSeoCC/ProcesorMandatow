@@ -113,6 +113,11 @@
   gap: 8px;
 }
 .delivery {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.deliveryMain {
   width: 100%;
   min-height: 88px;
   padding: 11px;
@@ -126,10 +131,78 @@
   gap: 9px;
   touch-action: manipulation;
 }
-.delivery.selected {
+.delivery.selected .deliveryMain {
   border-color: #82a9eb;
   background: #f5f8ff;
   box-shadow: 0 0 0 2px #dfeaff;
+}
+.removeStop {
+  width: 40px;
+  border: 1px solid #f0d3d3;
+  border-radius: 11px;
+  background: #fff5f5;
+  color: #c0392b;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.addStopButton {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 750;
+  color: #2563eb;
+  padding: 6px 10px;
+  border: 1px solid #cddcfa;
+  border-radius: 9px;
+  background: #f2f6ff;
+}
+.addStopForm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 13px;
+  margin-bottom: 10px;
+  border: 1px solid #dfe5ed;
+  border-radius: 13px;
+  background: #f9fafc;
+}
+.addStopForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: #5c6a7f;
+}
+.addStopForm input {
+  border: 1px solid #dce3ec;
+  border-radius: 9px;
+  padding: 9px 10px;
+  font-size: 11px;
+  color: #1c2534;
+  background: #fff;
+}
+.addStopRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.addStopSubmit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 42px;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 750;
+}
+.addStopSubmit:disabled {
+  opacity: 0.7;
 }
 .checkbox {
   width: 24px;
