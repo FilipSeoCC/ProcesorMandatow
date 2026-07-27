@@ -140,7 +140,7 @@ export async function POST(request: Request) {
         bytes: await file.arrayBuffer(),
       })),
     );
-    after(() => processMandateOcr(documentId, ocrFiles));
+    after(() => processMandateOcr(documentId, ocrFiles, member.organizationId));
     return NextResponse.json({
       mode: "supabase",
       documentId,

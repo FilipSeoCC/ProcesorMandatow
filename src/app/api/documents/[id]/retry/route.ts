@@ -74,6 +74,6 @@ export async function POST(
       { status: 502 },
     );
 
-  after(() => processMandateOcr(documentId, files));
+  after(() => processMandateOcr(documentId, files, member.organizationId));
   return NextResponse.json({ ocrStatus: "queued" });
 }

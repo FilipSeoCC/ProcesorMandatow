@@ -2,6 +2,7 @@ import "server-only";
 import { ExternalAccountClient } from "google-auth-library";
 import { getVercelOidcToken } from "@vercel/oidc";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+import { matchVehicleCustomer } from "@/lib/vehicle-match";
 
 type OcrFile = { name: string; type: string; bytes: ArrayBuffer };
 type ExtractedFields = {
@@ -192,7 +193,11 @@ async function updateDocument(
   if (!response.ok) throw new Error(`OCR_UPDATE_${response.status}`);
 }
 
-export async function processMandateOcr(documentId: string, files: OcrFile[]) {
+export async function processMandateOcr(
+  documentId: string,
+  files: OcrFile[],
+  organizationId: string,
+) {
   if (!documentAiConfig()) {
     await updateDocument(documentId, {
       status: "ocr_configuration_required",
@@ -206,6 +211,30 @@ export async function processMandateOcr(documentId: string, files: OcrFile[]) {
     const rawText = pageTexts.join("\n\n--- PAGE ---\n\n").trim();
     const fields = extractMandateFields(rawText);
     const ready = Boolean(fields.registrationNumber && fields.eventAt);
+
+    // Auto-match the vehicle's responsible customer right away so the
+    // reviewer opens a case that's already pre-filled, not just OCR text —
+    // this is the actual automation the app exists for.
+    let match: { name: string; taxId: string; email: string } | null = null;
+    if (ready) {
+      const { url, secretKey } = getSupabaseServerEnv();
+      if (url && secretKey) {
+        const result = await matchVehicleCustomer(
+          url,
+          secretKey,
+          organizationId,
+          fields.registrationNumber,
+          fields.eventAt,
+        );
+        if (result.matched)
+          match = {
+            name: result.responsibleName,
+            taxId: result.responsibleTaxId,
+            email: result.responsibleEmail,
+          };
+      }
+    }
+
     await updateDocument(documentId, {
       status: ready ? "ready" : "needs_review",
       ocr_text: rawText,
@@ -217,6 +246,13 @@ export async function processMandateOcr(documentId: string, files: OcrFile[]) {
       extraction_confidence: fields.confidence,
       ocr_error: "",
       processed_at: new Date().toISOString(),
+      ...(match
+        ? {
+            responsible_name: match.name,
+            responsible_tax_id: match.taxId,
+            responsible_email: match.email,
+          }
+        : {}),
     });
   } catch (error) {
     console.error("Mandate OCR failed", error);
