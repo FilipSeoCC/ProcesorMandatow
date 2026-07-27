@@ -392,6 +392,81 @@
 .caseList {
   overflow-y: auto;
 }
+.accountMenuWrap {
+  position: relative;
+}
+.accountMenu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 14px 34px #0f172a3d;
+  overflow: hidden;
+  z-index: 30;
+}
+.accountMenu button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 11px 13px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #33465e;
+  text-align: left;
+}
+.accountMenu button:hover {
+  background: #f4f7fb;
+}
+.settingsField {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+.settingsField small {
+  display: block;
+  font-size: 9px;
+  color: #7b8a9e;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.settingsField strong {
+  display: block;
+  font-size: 13px;
+  margin-top: 3px;
+}
+.settingsPasswordForm {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.settingsPasswordForm label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5c6a7f;
+}
+.settingsPasswordForm input {
+  border: 1px solid #dce3ec;
+  border-radius: 9px;
+  padding: 10px 11px;
+  font-size: 12px;
+}
+.settingsSaved {
+  font-size: 11px;
+  color: var(--green);
+  font-weight: 700;
+}
+.error {
+  font-size: 11px;
+  color: #c0392b;
+  font-weight: 600;
+}
 .toast {
   position: fixed;
   z-index: 60;

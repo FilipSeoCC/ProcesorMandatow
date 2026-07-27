@@ -15,6 +15,7 @@ import {
   ImagePlus,
   Inbox,
   LayoutDashboard,
+  LogOut,
   Menu,
   Monitor,
   MoreHorizontal,
@@ -137,6 +138,17 @@ export default function MandatyWorkspace() {
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [desktopMode, setDesktopMode] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [account, setAccount] = useState<{
+    email: string | null;
+    role: string | null;
+  } | null>(null);
+  const [newPassword, setNewPassword] = useState("");
+  const [passwordStatus, setPasswordStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     id: number;
     success: boolean;
@@ -245,7 +257,40 @@ export default function MandatyWorkspace() {
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-mount pattern
     loadDocuments(false).catch(() => null);
+    fetch("/api/auth", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (data) setAccount({ email: data.email ?? null, role: data.role ?? null });
+      })
+      .catch(() => null);
   }, []);
+
+  async function changePassword() {
+    if (newPassword.length < 8) {
+      setPasswordStatus("error");
+      setPasswordError("Nowe hasło musi mieć minimum 8 znaków.");
+      return;
+    }
+    setPasswordStatus("saving");
+    setPasswordError(null);
+    try {
+      const response = await fetch("/api/auth", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newPassword }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się zmienić hasła.");
+      setPasswordStatus("saved");
+      setNewPassword("");
+    } catch (reason) {
+      setPasswordStatus("error");
+      setPasswordError(
+        reason instanceof Error ? reason.message : "Nie udało się zmienić hasła.",
+      );
+    }
+  }
 
   useEffect(() => {
     const hasPending = caseItems.some(
@@ -468,18 +513,45 @@ export default function MandatyWorkspace() {
               <small>Sesja szyfrowana</small>
             </span>
           </div>
-          <button
-            className={styles.profileButton}
-            onClick={signOut}
-            title="Wyloguj"
-          >
-            <span className={styles.avatar}>AK</span>
-            <span>
-              <strong>Konto użytkownika</strong>
-              <small>Kliknij, aby się wylogować</small>
-            </span>
-            <MoreHorizontal size={18} />
-          </button>
+          <div className={styles.accountMenuWrap}>
+            {accountMenuOpen && (
+              <div className={styles.accountMenu} role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setSettingsOpen(true);
+                    setAccountMenuOpen(false);
+                  }}
+                >
+                  <UserRound size={16} />
+                  Ustawienia
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    signOut();
+                  }}
+                >
+                  <LogOut size={16} />
+                  Wyloguj się
+                </button>
+              </div>
+            )}
+            <button
+              className={styles.profileButton}
+              onClick={() => setAccountMenuOpen((current) => !current)}
+            >
+              <span className={styles.avatar}>AK</span>
+              <span>
+                <strong>Konto użytkownika</strong>
+                <small>{account?.email || "Kliknij, aby zobaczyć opcje"}</small>
+              </span>
+              <MoreHorizontal size={18} />
+            </button>
+          </div>
         </div>
       </aside>
       {mobileMenu && (
@@ -963,6 +1035,72 @@ export default function MandatyWorkspace() {
                 Rozumiem
               </button>
             </footer>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div
+          className={styles.modalLayer}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="settings-title"
+        >
+          <button
+            className={styles.modalBackdrop}
+            onClick={() => setSettingsOpen(false)}
+            aria-label="Zamknij okno"
+          />
+          <div className={styles.helpModal}>
+            <header>
+              <div>
+                <span>Konto</span>
+                <h2 id="settings-title">Ustawienia</h2>
+              </div>
+              <button
+                onClick={() => setSettingsOpen(false)}
+                aria-label="Zamknij"
+              >
+                <X size={21} />
+              </button>
+            </header>
+            <div className={styles.settingsField}>
+              <small>Adres e-mail</small>
+              <strong>{account?.email || "—"}</strong>
+            </div>
+            <div className={styles.settingsField}>
+              <small>Rola</small>
+              <strong>{account?.role || "—"}</strong>
+            </div>
+            <div className={styles.settingsPasswordForm}>
+              <label>
+                Nowe hasło
+                <input
+                  type="password"
+                  minLength={8}
+                  value={newPassword}
+                  onChange={(event) => {
+                    setNewPassword(event.target.value);
+                    setPasswordStatus("idle");
+                  }}
+                  placeholder="Minimum 8 znaków"
+                />
+              </label>
+              {passwordStatus === "error" && passwordError && (
+                <p className={styles.error}>{passwordError}</p>
+              )}
+              {passwordStatus === "saved" && (
+                <p className={styles.settingsSaved}>Hasło zostało zmienione.</p>
+              )}
+              <button
+                type="button"
+                className={styles.primaryButton}
+                disabled={passwordStatus === "saving"}
+                onClick={changePassword}
+              >
+                {passwordStatus === "saving" ? "Zapisuję…" : "Zmień hasło"}
+              </button>
+            </div>
           </div>
         </div>
       )}

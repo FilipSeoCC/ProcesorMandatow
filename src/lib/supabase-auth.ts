@@ -4,6 +4,7 @@ import { getSupabaseServerEnv } from "@/lib/supabase-env";
 export type AppRole = "admin" | "dispatcher" | "office" | "scanner" | "viewer";
 export type VerifiedMember = {
   userId: string;
+  email: string | null;
   organizationId: string;
   role: AppRole;
   accessToken: string;
@@ -33,7 +34,10 @@ export async function verifyMember(
     signal: AbortSignal.timeout(8_000),
   });
   if (!userResponse.ok) return null;
-  const user = (await userResponse.json()) as { id?: string };
+  const user = (await userResponse.json()) as {
+    id?: string;
+    email?: string;
+  };
   if (!user.id) return null;
 
   const memberResponse = await fetch(
@@ -53,6 +57,7 @@ export async function verifyMember(
   if (!membership || !allowed.includes(membership.role)) return null;
   return {
     userId: user.id,
+    email: user.email ?? null,
     organizationId: membership.organization_id,
     role: membership.role,
     accessToken,

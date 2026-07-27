@@ -84,7 +84,47 @@ export async function GET(request: Request) {
     authenticated: true,
     role: member.role,
     organizationId: member.organizationId,
+    email: member.email,
   });
+}
+
+export async function PATCH(request: Request) {
+  const member = await verifyMember(request, [...allRoles]);
+  if (!member)
+    return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
+  const body = (await request.json().catch(() => null)) as {
+    newPassword?: string;
+  } | null;
+  const newPassword = body?.newPassword ?? "";
+  if (newPassword.length < 8)
+    return NextResponse.json(
+      { error: "Nowe hasło musi mieć minimum 8 znaków." },
+      { status: 422 },
+    );
+  const { url, publishableKey } = getSupabaseServerEnv();
+  if (!url || !publishableKey)
+    return NextResponse.json(
+      { error: "Supabase nie jest skonfigurowany." },
+      { status: 503 },
+    );
+  const response = await fetch(`${url}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${member.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ password: newPassword }),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    return NextResponse.json(
+      { error: data.msg || data.error_description || "Nie udało się zmienić hasła." },
+      { status: 400 },
+    );
+  }
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: Request) {
