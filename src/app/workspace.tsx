@@ -32,6 +32,7 @@ import {
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import DeliveryPlanner from "./delivery-planner";
+import Employees from "./employees";
 import FleetManager from "./fleet-manager";
 import MobileCapture from "./mobile-capture";
 import styles from "./workspace.module.css";
@@ -133,7 +134,7 @@ const statusClass: Record<CaseStatus, string> = {
 
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<
-    "cases" | "fleet" | "documents" | "routes"
+    "cases" | "fleet" | "documents" | "routes" | "employees"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [desktopMode, setDesktopMode] = useState(false);
@@ -504,6 +505,17 @@ export default function MandatyWorkspace() {
             <UsersRound size={19} />
             Flota
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setActiveView("employees");
+              setMobileMenu(false);
+            }}
+            className={`${styles.navItem} ${activeView === "employees" ? styles.navActive : ""}`}
+          >
+            <UserRound size={19} />
+            Pracownicy
+          </button>
         </nav>
         <div className={styles.sidebarFooter}>
           <div className={styles.securityNote}>
@@ -573,7 +585,9 @@ export default function MandatyWorkspace() {
                   ? "Dokumenty"
                   : activeView === "routes"
                     ? "Planer tras"
-                    : "Zarządzanie flotą"}
+                    : activeView === "employees"
+                      ? "Pracownicy"
+                      : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
@@ -597,7 +611,7 @@ export default function MandatyWorkspace() {
                 <Upload size={18} />
                 Importuj flotę
               </button>
-            ) : activeView === "routes" ? null : (
+            ) : activeView === "routes" || activeView === "employees" ? null : (
               <button
                 className={styles.primaryButton}
                 onClick={() => setScanOpen(true)}
@@ -614,6 +628,8 @@ export default function MandatyWorkspace() {
             importOpen={fleetImportOpen}
             onCloseImport={() => setFleetImportOpen(false)}
           />
+        ) : activeView === "employees" ? (
+          <Employees />
         ) : activeView === "routes" ? (
           <DeliveryPlanner />
         ) : activeView === "documents" ? (
@@ -937,7 +953,7 @@ export default function MandatyWorkspace() {
           <Upload size={21} />
           Importuj flotę
         </button>
-      ) : activeView === "routes" ? null : (
+      ) : activeView === "routes" || activeView === "employees" ? null : (
         <button
           className={styles.mobileScanButton}
           onClick={() => setScanOpen(true)}
@@ -1025,6 +1041,10 @@ export default function MandatyWorkspace() {
               <li>
                 <strong>Planer tras</strong> — układanie kolejności dostaw i
                 odbiorów aut przy użyciu Google Maps.
+              </li>
+              <li>
+                <strong>Pracownicy</strong> — baza kierowców, kontakty i
+                terminy ważności prawa jazdy.
               </li>
             </ul>
             <footer>
