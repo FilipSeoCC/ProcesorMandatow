@@ -1,12 +1,10 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   FileText,
   LoaderCircle,
   LockKeyhole,
-  LogOut,
   ShieldCheck,
 } from "lucide-react";
 import styles from "./auth-gate.module.css";
@@ -19,12 +17,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- gate for a document.body portal target that only exists client-side
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     fetch("/api/auth", { cache: "no-store" })
@@ -64,11 +56,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setError(result.error || "Nie udało się połączyć z Supabase.");
   }
 
-  async function signOut() {
-    await fetch("/api/auth", { method: "DELETE" });
-    setStatus("guest");
-  }
-
   if (status === "loading")
     return (
       <main className={styles.loading}>
@@ -76,23 +63,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         <span>Sprawdzamy bezpieczną sesję…</span>
       </main>
     );
-  if (status === "ready")
-    return (
-      <>
-        {mounted &&
-          createPortal(
-            <button
-              className={styles.mobileLogout}
-              onClick={signOut}
-              aria-label="Wyloguj"
-            >
-              <LogOut size={18} />
-            </button>,
-            document.body,
-          )}
-        {children}
-      </>
-    );
+  if (status === "ready") return <>{children}</>;
   return (
     <main className={styles.page}>
       <section className={styles.card}>

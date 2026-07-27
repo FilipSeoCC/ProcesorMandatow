@@ -256,25 +256,27 @@ export default function Employees() {
             <article key={employee.id}>
               <div>
                 <code>{employee.phone}</code>
-                <span className={statusClass[employee.status]}>{employee.status}</span>
-                <span className={styles.mobileRowActions}>
-                  <button
-                    type="button"
-                    className={styles.editVehicle}
-                    onClick={() => openEdit(employee)}
-                    aria-label={`Edytuj pracownika ${employee.name}`}
-                  >
-                    Edytuj
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.removeVehicle}
-                    disabled={removingId === employee.id}
-                    onClick={() => removeEmployee(employee.id)}
-                    aria-label={`Usuń pracownika ${employee.name}`}
-                  >
-                    <Trash2 size={15} />
-                  </button>
+                <span className={styles.mobileCardRight}>
+                  <span className={statusClass[employee.status]}>{employee.status}</span>
+                  <span className={styles.mobileRowActions}>
+                    <button
+                      type="button"
+                      className={styles.editVehicle}
+                      onClick={() => openEdit(employee)}
+                      aria-label={`Edytuj pracownika ${employee.name}`}
+                    >
+                      Edytuj
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.removeVehicle}
+                      disabled={removingId === employee.id}
+                      onClick={() => removeEmployee(employee.id)}
+                      aria-label={`Usuń pracownika ${employee.name}`}
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </span>
                 </span>
               </div>
               <h3>{employee.name}</h3>

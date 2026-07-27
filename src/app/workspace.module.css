@@ -150,6 +150,16 @@
 .profileButton:hover {
   background: #ffffff0c;
 }
+.profileButton > span:nth-child(2) {
+  min-width: 0;
+}
+.profileButton strong,
+.profileButton small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .avatar {
   width: 36px;
   height: 36px;
@@ -191,11 +201,6 @@
   display: flex;
   align-items: center;
   gap: 10px;
-}
-.topbarActions {
-  /* Leaves room for the fixed-position "Zglos blad" + desktop-mode toggle
-     buttons, which float in the same top-right corner as a row. */
-  margin-right: 210px;
 }
 .primaryButton,
 .secondaryButton,
@@ -755,6 +760,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+}
+.caseMeta span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.caseMeta span:last-child {
+  flex-shrink: 0;
 }
 .plate {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1697,6 +1711,11 @@
     background: #fff;
     padding-top: env(safe-area-inset-top);
     overflow-y: auto;
+  }
+  .bulkBar {
+    /* Clears the fixed "Skanuj dokument" bar (min-height 54px + its own
+       bottom offset) so bulk-select actions stay reachable, not covered. */
+    padding-bottom: calc(54px + max(14px, env(safe-area-inset-bottom)) + 12px);
   }
   .mobileScanButton {
     position: fixed;

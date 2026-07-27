@@ -176,29 +176,6 @@
   color: #718096;
   font-size: 11px;
 }
-.mobileLogout {
-  display: none;
-}
-.reportBugButton {
-  position: fixed;
-  z-index: 45;
-  right: 14px;
-  top: 14px;
-  height: 40px;
-  padding: 0 14px;
-  border-radius: 10px;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #fff;
-  background: #172033;
-  box-shadow: 0 10px 24px #0f172a4d;
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-  will-change: transform;
-}
 .bugModalLayer {
   position: fixed;
   inset: 0;
@@ -216,6 +193,8 @@
 .bugModal {
   position: relative;
   width: min(100%, 440px);
+  max-height: calc(100dvh - 36px);
+  overflow-y: auto;
   background: #fff;
   border-radius: 16px;
   padding: 20px;
@@ -339,36 +318,6 @@
   .card {
     padding: 22px 18px;
     border-radius: 18px;
-  }
-  .mobileLogout {
-    display: grid;
-    position: fixed;
-    z-index: 45;
-    right: 72px;
-    top: max(11px, env(safe-area-inset-top));
-    width: 44px;
-    height: 44px;
-    place-items: center;
-    border-radius: 11px;
-    color: #60728a;
-    background: #fff;
-    border: 1px solid #dce4ee;
-    transform: translateZ(0);
-    -webkit-transform: translateZ(0);
-    will-change: transform;
-  }
-  .reportBugButton {
-    left: 14px;
-    right: auto;
-    top: max(11px, env(safe-area-inset-top));
-    width: 44px;
-    height: 44px;
-    padding: 0;
-    justify-content: center;
-    border-radius: 12px;
-  }
-  .bugLabel {
-    display: none;
   }
 }
 @media (prefers-reduced-motion: reduce) {

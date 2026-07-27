@@ -2,8 +2,8 @@
 .headerActions{display:flex;align-items:center;gap:10px}
 .addVehicleButton{display:flex;align-items:center;gap:6px;height:42px;padding:0 14px;border-radius:9px;background:#2563eb;color:#fff;font-size:11px;font-weight:750;white-space:nowrap}
 .removeVehicle{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:#c0392b;background:#fff5f5;border:1px solid #f0d3d3}
-.mobileCards article>div{position:relative}
-.mobileCards article>div .mobileRowActions{position:absolute;right:0;top:-2px;display:flex;align-items:center;gap:8px}
+.mobileCardRight{display:flex;align-items:center;gap:8px}
+.mobileRowActions{display:flex;align-items:center;gap:8px}
 .mobileCards .removeVehicle{width:40px;height:40px}
 .mobileCards .editVehicle{min-height:40px}
 .rowActions{display:flex;align-items:center;gap:8px}
