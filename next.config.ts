@@ -3,9 +3,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   outputFileTracingIncludes: {
-    "/api/documents/[id]/notice": [
+    "/api/documents/\\[id\\]/notice": [
       "./node_modules/@fontsource/noto-sans/files/noto-sans-latin-ext-400-normal.woff",
-      "./node_modules/pdfkit/js/data/*.afm",
+      "./node_modules/pdfkit/js/data/**/*",
     ],
   },
   async headers() {
