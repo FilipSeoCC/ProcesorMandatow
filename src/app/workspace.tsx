@@ -276,7 +276,6 @@ export default function MandatyWorkspace() {
   const [matchOk, setMatchOk] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [sendPackageOpen, setSendPackageOpen] = useState(false);
-  const [sendPackageRecipient, setSendPackageRecipient] = useState("");
   const [sendingPackage, setSendingPackage] = useState(false);
   const [sendPackageError, setSendPackageError] = useState<string | null>(null);
   const [caseMenuOpen, setCaseMenuOpen] = useState(false);
@@ -726,7 +725,6 @@ export default function MandatyWorkspace() {
 
   function openSendPackage() {
     setSendPackageError(null);
-    setSendPackageRecipient(account?.email || "");
     setSendPackageOpen(true);
   }
 
@@ -740,11 +738,6 @@ export default function MandatyWorkspace() {
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            sendPackageRecipient.trim()
-              ? { recipientEmail: sendPackageRecipient.trim() }
-              : {},
-          ),
         },
       );
       const data = await response.json().catch(() => ({}));
@@ -754,7 +747,7 @@ export default function MandatyWorkspace() {
       setToast({
         id: Date.now(),
         success: true,
-        message: "Sprawa została wysłana do weryfikacji.",
+        message: "Gotowy pakiet został wysłany na Twój e-mail.",
       });
       await loadDocuments(true);
     } catch (reason) {
@@ -1820,7 +1813,7 @@ export default function MandatyWorkspace() {
                               <Send size={18} />
                               {selected.reviewPackageSentAt
                                 ? "Wyślij ponownie"
-                                : "Wyślij pakiet do pracownika"}
+                                : "Wyślij do siebie"}
                             </button>
                           ))}
                         <button
@@ -1899,7 +1892,7 @@ export default function MandatyWorkspace() {
             <header>
               <div>
                 <span>Sprawa {selected.id}</span>
-                <h2 id="send-package-title">Wyślij pakiet do pracownika</h2>
+                <h2 id="send-package-title">Wyślij pakiet do siebie</h2>
               </div>
               <button
                 onClick={() => !sendingPackage && setSendPackageOpen(false)}
@@ -1909,7 +1902,7 @@ export default function MandatyWorkspace() {
               </button>
             </header>
             <p>
-              Wiadomość trafi na e-mail pracownika — <strong>nie bezpośrednio
+              Wiadomość trafi na Twój e-mail — <strong>nie bezpośrednio
               do klienta</strong>. Będzie zawierać skan wezwania i gotowy
               szablon do przekazania klientowi; przed przesłaniem dalej warto
               go jeszcze sprawdzić.
@@ -1925,14 +1918,6 @@ export default function MandatyWorkspace() {
                 <strong>Dopasowany klient:</strong> {draft.responsibleName}
               </li>
             </ul>
-            <div className={styles.formGrid}>
-              <Field
-                label="Adres e-mail pracownika"
-                value={sendPackageRecipient}
-                onChange={setSendPackageRecipient}
-                wide
-              />
-            </div>
             {sendPackageError && (
               <p className={styles.uploadError}>{sendPackageError}</p>
             )}

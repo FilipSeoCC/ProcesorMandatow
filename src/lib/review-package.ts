@@ -27,7 +27,7 @@ export function buildClientMessage(document: MandateMailData) {
   };
 }
 
-export function buildReviewPackage(document: MandateMailData, appUrl: string, documentId: string) {
+export function buildReviewPackage(document: MandateMailData, appUrl: string, documentId: string, recipientName = "") {
   const registration = display(document.registration_number);
   const client = display(document.responsible_name);
   const clientMessage = buildClientMessage(document);
@@ -35,5 +35,11 @@ export function buildReviewPackage(document: MandateMailData, appUrl: string, do
   const detailsUrl = `${appUrl.replace(/\/$/, "")}/?document=${encodeURIComponent(documentId)}`;
   const text = `Cześć,\n\nSystem przygotował wiadomość do przekazania klientowi w sprawie zdarzenia drogowego.\n\nPojazd: ${registration}\nData zdarzenia: ${display(document.event_at)}\nKlient dopasowany z historii pojazdu: ${client}\nNumer sprawy: ${caseNumber}\nOrgan: ${display(document.sender)}\n\nOtwórz sprawę w panelu: ${detailsUrl}\n\nPrzed przekazaniem sprawdź proszę zgodność danych oraz załącznik.\n\n---------------------------------------------\nGOTOWA TREŚĆ DO PRZESŁANIA KLIENTOWI\n---------------------------------------------\nTemat: ${clientMessage.subject}\n\n${clientMessage.text}`;
   const html = `<p>Cześć,</p><p>System przygotował wiadomość do przekazania klientowi w sprawie zdarzenia drogowego.</p><table><tr><td><strong>Pojazd:</strong></td><td>${escapeHtml(registration)}</td></tr><tr><td><strong>Data zdarzenia:</strong></td><td>${escapeHtml(display(document.event_at))}</td></tr><tr><td><strong>Klient:</strong></td><td>${escapeHtml(client)}</td></tr><tr><td><strong>Numer sprawy:</strong></td><td>${escapeHtml(caseNumber)}</td></tr><tr><td><strong>Organ:</strong></td><td>${escapeHtml(display(document.sender))}</td></tr></table><p><a href="${escapeHtml(detailsUrl)}">Otwórz sprawę w panelu</a></p><p>Przed przekazaniem sprawdź proszę zgodność danych oraz załącznik.</p><hr /><p><strong>GOTOWA TREŚĆ DO PRZESŁANIA KLIENTOWI</strong></p><p><strong>Temat:</strong> ${escapeHtml(clientMessage.subject)}</p><div style="white-space:pre-wrap">${escapeHtml(clientMessage.text)}</div>`;
-  return { text, html, clientMessage };
+  const personalizedText = recipientName
+    ? `Dzień dobry ${recipientName},${text.slice(text.indexOf(",") + 1)}`
+    : text;
+  const personalizedHtml = recipientName
+    ? html.replace(/^<p>.*?<\/p>/, `<p>Dzień dobry ${escapeHtml(recipientName)},</p>`)
+    : html;
+  return { text: personalizedText, html: personalizedHtml, clientMessage };
 }

@@ -23,11 +23,6 @@ type DocumentRow = {
 
 type PageRow = { storage_path: string; original_name: string; mime_type: string; size_bytes: number };
 
-function configuredRecipient(fallback: string | null) {
-  const value = process.env.MANDATE_REVIEW_EMAIL?.trim() || fallback?.trim() || "";
-  return EMAIL.test(value) ? value : null;
-}
-
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const member = await verifyMember(request, ["admin", "office"]);
@@ -38,9 +33,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!resendKey || !from)
     return NextResponse.json({ error: "Wysyłka e-mail nie jest jeszcze skonfigurowana." }, { status: 503 });
 
-  const recipient = configuredRecipient(member.email);
+  const recipient = member.email?.trim() || "";
   if (!recipient)
-    return NextResponse.json({ error: "Brakuje poprawnego adresu e-mail pracownika." }, { status: 422 });
+    return NextResponse.json({ error: "Twoje konto nie ma poprawnego adresu e-mail." }, { status: 422 });
+  if (!EMAIL.test(recipient))
+    return NextResponse.json({ error: "Twoje konto nie ma poprawnego adresu e-mail." }, { status: 422 });
+  const recipientName = [member.firstName, member.lastName].filter(Boolean).join(" ").trim();
 
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey) return NextResponse.json({ error: "Supabase nie jest skonfigurowany." }, { status: 503 });
@@ -52,7 +50,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!document.confirmed_at || !document.responsible_name || !document.responsible_email)
     return NextResponse.json({ error: "Najpierw zatwierdź dane klienta i odbiorcy." }, { status: 422 });
   if (document.review_package_sent_at)
-    return NextResponse.json({ error: "Pakiet do pracownika został już wysłany dla tej sprawy." }, { status: 409 });
+    return NextResponse.json({ error: "Pakiet został już wysłany na Twoją skrzynkę dla tej sprawy." }, { status: 409 });
 
   const pagesResponse = await fetch(`${url}/rest/v1/mandate_document_pages?select=storage_path,original_name,mime_type,size_bytes&document_id=eq.${encodeURIComponent(id)}&organization_id=eq.${member.organizationId}&order=page_number.asc`, { headers, cache: "no-store" });
   const pages = pagesResponse.ok ? ((await pagesResponse.json()) as PageRow[]) : [];
@@ -67,7 +65,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const appUrl = process.env.APP_URL?.trim() || new URL(request.url).origin;
-  const packageMail = buildReviewPackage(document, appUrl, id);
+  const packageMail = buildReviewPackage(document, appUrl, id, recipientName);
   const subject = `[DO PRZESŁANIA] Wezwanie dotyczące pojazdu ${(document.registration_number || "bez rejestracji").replace(/[\r\n]+/g, " ")} · sprawa ${(document.case_number || id).replace(/[\r\n]+/g, " ")}`;
   const emailResponse = await fetch("https://api.resend.com/emails", {
     method: "POST",
