@@ -244,6 +244,34 @@
   border-color: #b9c5d5;
   background: #f9fbfd;
 }
+.authorityButton {
+  min-height: 44px;
+  border-radius: 10px;
+  padding: 0 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #b9cdf7;
+  background: #eff5ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  font-weight: 750;
+  cursor: pointer;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.authorityButton:hover {
+  background: #e4edff;
+  border-color: #7ea4ec;
+  box-shadow: 0 5px 14px #2563eb18;
+}
+.authorityButton:focus-visible {
+  outline: 3px solid #93b4f3;
+  outline-offset: 2px;
+}
 .iconButton,
 .moreButton {
   position: relative;
@@ -1198,10 +1226,13 @@
 }
 .formFooter > div {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 .formFooter .primaryButton,
-.formFooter .secondaryButton {
+.formFooter .secondaryButton,
+.formFooter .authorityButton {
   min-height: 40px;
   font-size: 11px;
 }
@@ -1292,6 +1323,66 @@
 .helpModal footer {
   display: flex;
   justify-content: flex-end;
+}
+.authoritySummary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.authoritySummary span {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.authoritySummary strong {
+  display: block;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.authorityForm {
+  display: grid;
+  gap: 12px;
+}
+.authorityForm label {
+  display: grid;
+  gap: 6px;
+}
+.authorityForm label > span {
+  color: #526176;
+  font-size: 10px;
+  font-weight: 750;
+}
+.authorityForm input,
+.authorityForm textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 10px 11px;
+  background: #fff;
+  color: #24344a;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  outline: none;
+  resize: vertical;
+}
+.authorityForm input:focus,
+.authorityForm textarea:focus {
+  border-color: #6f9bec;
+  box-shadow: 0 0 0 3px #dbeafe;
+}
+.authorityModalFooter {
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .modalHeader {
   display: flex;
@@ -1717,6 +1808,36 @@
     padding-top: env(safe-area-inset-top);
     overflow-y: auto;
   }
+  .formFooter {
+    align-items: stretch;
+    flex-direction: column;
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    padding-bottom: max(13px, env(safe-area-inset-bottom));
+  }
+  .formFooter > div {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .formFooter .primaryButton,
+  .formFooter .secondaryButton,
+  .formFooter .authorityButton {
+    width: 100%;
+  }
+  .formFooter .primaryButton {
+    grid-column: 1 / -1;
+  }
+  .authoritySummary {
+    grid-template-columns: 1fr;
+  }
+  .authorityModalFooter {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+  }
+  .authorityModalFooter .primaryButton {
+    grid-column: 1 / -1;
+  }
   .bulkBar {
     /* Clears the fixed "Skanuj dokument" bar (min-height 54px + its own
        bottom offset) so bulk-select actions stay reachable, not covered. */
@@ -1791,6 +1912,7 @@
   .sidebar,
   .primaryButton,
   .secondaryButton,
+  .authorityButton,
   .caseItem,
   .uploadArea {
     transition: none;

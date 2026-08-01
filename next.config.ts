@@ -6,6 +6,12 @@ const nextConfig: NextConfig = {
     "/api/documents/\\[id\\]/notice": [
       "./src/assets/NotoSans-Regular.ttf",
     ],
+    "/api/documents/\\[id\\]/authority-notice": [
+      "./src/assets/NotoSans-Regular.ttf",
+    ],
+    "/api/documents/\\[id\\]/authority-package": [
+      "./src/assets/NotoSans-Regular.ttf",
+    ],
   },
   async headers() {
     return [

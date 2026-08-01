@@ -17,6 +17,7 @@ import {
   ImagePlus,
   Inbox,
   LayoutDashboard,
+  Landmark,
   LogOut,
   Menu,
   MoreHorizontal,
@@ -53,6 +54,7 @@ type CaseItem = {
   plate: string;
   sender: string;
   eventAt: string;
+  letterDate?: string | null;
   receivedAt: string;
   deadline: string;
   status: CaseStatus;
@@ -278,6 +280,12 @@ export default function MandatyWorkspace() {
   const [sendPackageOpen, setSendPackageOpen] = useState(false);
   const [sendingPackage, setSendingPackage] = useState(false);
   const [sendPackageError, setSendPackageError] = useState<string | null>(null);
+  const [authorityPackageOpen, setAuthorityPackageOpen] = useState(false);
+  const [sendingAuthorityPackage, setSendingAuthorityPackage] = useState(false);
+  const [preparingAuthorityPdf, setPreparingAuthorityPdf] = useState(false);
+  const [authorityPackageError, setAuthorityPackageError] = useState<string | null>(null);
+  const [authorityName, setAuthorityName] = useState("");
+  const [authorityAddress, setAuthorityAddress] = useState("");
   const [caseMenuOpen, setCaseMenuOpen] = useState(false);
   const [deletingCase, setDeletingCase] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -328,6 +336,12 @@ export default function MandatyWorkspace() {
     setMatchMessage(null);
     setMatchOk(false);
     setSaveError(null);
+    setAuthorityPackageOpen(false);
+    setAuthorityPackageError(null);
+    setAuthorityName(
+      selected.sender === "Nowy dokument z telefonu" ? "" : selected.sender,
+    );
+    setAuthorityAddress("");
     setCaseMenuOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.id]);
@@ -425,6 +439,7 @@ export default function MandatyWorkspace() {
         uploaded_by: string | null;
         registration_number: string | null;
         event_at: string | null;
+        letter_date: string | null;
         case_number: string | null;
         sender: string | null;
         previewUrl: string | null;
@@ -445,6 +460,7 @@ export default function MandatyWorkspace() {
       plate: document.registration_number || "OCR…",
       sender: document.sender || "Nowy dokument z telefonu",
       eventAt: document.event_at || "Oczekuje na OCR",
+      letterDate: document.letter_date,
       receivedAt: new Date(document.created_at).toLocaleString("pl-PL", {
         day: "2-digit",
         month: "2-digit",
@@ -758,6 +774,99 @@ export default function MandatyWorkspace() {
       );
     } finally {
       setSendingPackage(false);
+    }
+  }
+
+  function openAuthorityPackage() {
+    setAuthorityPackageError(null);
+    setAuthorityName(
+      draft.sender.trim() ||
+        (selected.sender === "Nowy dokument z telefonu" ? "" : selected.sender),
+    );
+    setAuthorityPackageOpen(true);
+  }
+
+  async function downloadAuthorityNotice() {
+    if (!selected.documentId) return;
+    if (!authorityName.trim() || !authorityAddress.trim()) {
+      setAuthorityPackageError("Uzupełnij nazwę i pełny adres urzędu.");
+      return;
+    }
+    setPreparingAuthorityPdf(true);
+    setAuthorityPackageError(null);
+    try {
+      const response = await fetch(
+        `/api/documents/${selected.documentId}/authority-notice`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            authorityName: authorityName.trim(),
+            authorityAddress: authorityAddress.trim(),
+          }),
+        },
+      );
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || "Nie udało się przygotować PDF.");
+      }
+      const pdf = await response.blob();
+      const downloadUrl = URL.createObjectURL(pdf);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = `pismo-do-urzedu-${selected.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1_000);
+    } catch (reason) {
+      setAuthorityPackageError(
+        reason instanceof Error
+          ? reason.message
+          : "Nie udało się przygotować PDF.",
+      );
+    } finally {
+      setPreparingAuthorityPdf(false);
+    }
+  }
+
+  async function sendAuthorityPackage() {
+    if (!selected.documentId || sendingAuthorityPackage) return;
+    if (!authorityName.trim() || !authorityAddress.trim()) {
+      setAuthorityPackageError("Uzupełnij nazwę i pełny adres urzędu.");
+      return;
+    }
+    setSendingAuthorityPackage(true);
+    setAuthorityPackageError(null);
+    try {
+      const response = await fetch(
+        `/api/documents/${selected.documentId}/authority-package`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            authorityName: authorityName.trim(),
+            authorityAddress: authorityAddress.trim(),
+          }),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się przygotować pakietu do urzędu.");
+      setAuthorityPackageOpen(false);
+      setToast({
+        id: Date.now(),
+        success: true,
+        message: "Pakiet do urzędu został wysłany na Twój e-mail.",
+      });
+    } catch (reason) {
+      setAuthorityPackageError(
+        reason instanceof Error
+          ? reason.message
+          : "Nie udało się przygotować pakietu do urzędu.",
+      );
+    } finally {
+      setSendingAuthorityPackage(false);
     }
   }
 
@@ -1787,7 +1896,7 @@ export default function MandatyWorkspace() {
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            <FileDown size={18} /> Pobierz wezwanie PDF
+                            <FileDown size={18} /> PDF dla klienta
                           </a>
                         )}
                         {selected.confirmedAt &&
@@ -1812,10 +1921,19 @@ export default function MandatyWorkspace() {
                             >
                               <Send size={18} />
                               {selected.reviewPackageSentAt
-                                ? "Wyślij ponownie"
-                                : "Wyślij do siebie"}
+                                ? "Pakiet dla klienta ponownie"
+                                : "Pakiet dla klienta"}
                             </button>
                           ))}
+                        {selected.confirmedAt && selected.documentId && (
+                          <button
+                            type="button"
+                            className={styles.authorityButton}
+                            onClick={openAuthorityPackage}
+                          >
+                            <Landmark size={18} /> Pakiet do urzędu
+                          </button>
+                        )}
                         <button
                           type="button"
                           className={styles.primaryButton}
@@ -1892,7 +2010,7 @@ export default function MandatyWorkspace() {
             <header>
               <div>
                 <span>Sprawa {selected.id}</span>
-                <h2 id="send-package-title">Wyślij pakiet do siebie</h2>
+                <h2 id="send-package-title">Pakiet dla klienta</h2>
               </div>
               <button
                 onClick={() => !sendingPackage && setSendPackageOpen(false)}
@@ -1937,6 +2055,117 @@ export default function MandatyWorkspace() {
               >
                 <Send size={18} />
                 {sendingPackage ? "Wysyłam…" : "Wyślij"}
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {authorityPackageOpen && (
+        <div
+          className={styles.modalLayer}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="authority-package-title"
+        >
+          <button
+            className={styles.modalBackdrop}
+            onClick={() =>
+              !sendingAuthorityPackage &&
+              !preparingAuthorityPdf &&
+              setAuthorityPackageOpen(false)
+            }
+            aria-label="Zamknij okno"
+          />
+          <div className={styles.helpModal}>
+            <header>
+              <div>
+                <span>Sprawa {selected.id}</span>
+                <h2 id="authority-package-title">Pakiet do urzędu</h2>
+              </div>
+              <button
+                onClick={() =>
+                  !sendingAuthorityPackage &&
+                  !preparingAuthorityPdf &&
+                  setAuthorityPackageOpen(false)
+                }
+                aria-label="Zamknij"
+              >
+                <X size={21} />
+              </button>
+            </header>
+            <p>
+              System przygotuje osobne oświadczenie o wskazaniu użytkownika
+              pojazdu. PDF możesz pobrać od razu. Po podłączeniu Resenda cały
+              pakiet — pismo i skan źródłowy — trafi na Twój e-mail do
+              sprawdzenia i przekazania urzędowi.
+            </p>
+            <div className={styles.authoritySummary}>
+              <span>
+                <strong>Pojazd</strong>
+                {selected.plate}
+              </span>
+              <span>
+                <strong>Data zdarzenia</strong>
+                {selected.eventAt}
+              </span>
+              <span>
+                <strong>Wskazany użytkownik</strong>
+                {draft.responsibleName || "Brak dopasowania"}
+              </span>
+            </div>
+            <div className={styles.authorityForm}>
+              <label>
+                <span>Nazwa urzędu / organu</span>
+                <input
+                  value={authorityName}
+                  onChange={(event) => setAuthorityName(event.target.value)}
+                  placeholder="np. Główny Inspektorat Transportu Drogowego"
+                  maxLength={200}
+                />
+              </label>
+              <label>
+                <span>Pełny adres urzędu</span>
+                <textarea
+                  value={authorityAddress}
+                  onChange={(event) => setAuthorityAddress(event.target.value)}
+                  placeholder="Ulica, kod pocztowy i miejscowość"
+                  maxLength={500}
+                  rows={3}
+                />
+              </label>
+            </div>
+            {authorityPackageError && (
+              <p className={styles.uploadError} role="alert">
+                {authorityPackageError}
+              </p>
+            )}
+            <footer className={styles.authorityModalFooter}>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={() => setAuthorityPackageOpen(false)}
+                disabled={sendingAuthorityPackage || preparingAuthorityPdf}
+              >
+                Anuluj
+              </button>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={downloadAuthorityNotice}
+                disabled={sendingAuthorityPackage || preparingAuthorityPdf}
+              >
+                <FileDown size={18} />
+                {preparingAuthorityPdf ? "Przygotowuję…" : "Pobierz PDF"}
+              </button>
+              <button
+                type="button"
+                className={styles.primaryButton}
+                onClick={sendAuthorityPackage}
+                disabled={sendingAuthorityPackage || preparingAuthorityPdf}
+              >
+                <Send size={18} />
+                {sendingAuthorityPackage ? "Wysyłam…" : "Wyślij do siebie"}
               </button>
             </footer>
           </div>
