@@ -6,7 +6,8 @@
     "dev": "next dev -p 4173",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:authority": "node scripts/check-authority-detection.cjs"
   },
   "dependencies": {
     "@fontsource/noto-sans": "^5.3.0",
