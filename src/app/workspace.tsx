@@ -12,6 +12,7 @@ import {
   CircleHelp,
   Clock3,
   FileText,
+  FileDown,
   Files,
   ImagePlus,
   Inbox,
@@ -72,18 +73,33 @@ const pendingOcrStatuses = new Set(["uploaded", "processing"]);
 
 type UploadPage = { id: string; file: File; name: string };
 
-function extensionOf(fileName: string) {
-  const match = fileName.match(/\.[^.]+$/);
-  return match ? match[0] : "";
-}
+async function prepareCameraUpload(file: File) {
+  if (!file.type.startsWith("image/") || file.size <= 1_000_000)
+    return { blob: file as Blob, name: file.name };
 
-function renamedFile(file: File, displayName: string) {
-  const trimmed = displayName.trim();
-  if (!trimmed) return file;
-  return new File([file], `${trimmed}${extensionOf(file.name)}`, {
-    type: file.type,
-    lastModified: file.lastModified,
-  });
+  const sourceUrl = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Nie udało się odczytać zdjęcia."));
+      element.src = sourceUrl;
+    });
+    const scale = Math.min(1, 1600 / Math.max(image.naturalWidth, image.naturalHeight));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
+    if (!blob || blob.size >= file.size)
+      return { blob: file as Blob, name: file.name };
+    return {
+      blob,
+      name: `${file.name.replace(/\.[^.]+$/, "") || "skan"}.jpg`,
+    };
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
 }
 
 function storedAccessToken() {
@@ -847,10 +863,16 @@ export default function MandatyWorkspace() {
     setUploading(true);
     setUploadError(null);
     try {
-      const form = new FormData();
-      uploadedPages.forEach((page) =>
-        form.append("files", renamedFile(page.file, page.name)),
+      const preparedFiles = await Promise.all(
+        uploadedPages.map((page) => prepareCameraUpload(page.file)),
       );
+      const payloadSize = preparedFiles.reduce((sum, file) => sum + file.blob.size, 0);
+      if (payloadSize > 4 * 1024 * 1024)
+        throw new Error(
+          "Zbyt dużo danych do wysłania naraz. Wyślij maksymalnie 3–4 zdjęcia lub podziel dokument na dwie sprawy.",
+        );
+      const form = new FormData();
+      preparedFiles.forEach((file) => form.append("files", file.blob, file.name));
       let token: string | null = null;
       for (let index = 0; index < localStorage.length; index++) {
         const key = localStorage.key(index);
@@ -1685,6 +1707,16 @@ export default function MandatyWorkspace() {
                             {resolving ? "Zapisuję…" : "Oznacz jako zrealizowaną"}
                           </button>
                         )}
+                        {selected.confirmedAt && selected.documentId && (
+                          <a
+                            className={styles.secondaryButton}
+                            href={`/api/documents/${selected.documentId}/notice`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <FileDown size={18} /> Pobierz wezwanie PDF
+                          </a>
+                        )}
                         <button
                           type="button"
                           className={styles.primaryButton}
@@ -2021,7 +2053,7 @@ export default function MandatyWorkspace() {
               <label className={styles.cameraAction}>
                 <input
                   type="file"
-                  accept="image/*,.heic,.heif"
+                  accept="image/*"
                   capture="environment"
                   onChange={handleFiles}
                 />
