@@ -38,8 +38,14 @@ export async function matchVehicleCustomer(
   if (!vehicle)
     return { matched: false, reason: "Nie znaleziono pojazdu o tym numerze rejestracyjnym we flocie." };
 
+  // eventAt round-trips through a timestamptz column and comes back as
+  // "...+00:00" (Postgres's offset notation) rather than "...Z" — the "+" is
+  // a literal character here, but an unencoded "+" in a query string is
+  // interpreted as a space, silently corrupting the timestamp and making
+  // this filter match nothing even when a covering assignment exists.
+  const eventAtParam = encodeURIComponent(eventAt);
   const assignmentsResponse = await fetch(
-    `${url}/rest/v1/vehicle_assignments?select=customer_id,valid_from,valid_to&organization_id=eq.${organizationId}&vehicle_id=eq.${vehicle.id}&valid_from=lte.${eventAt}&or=(valid_to.is.null,valid_to.gte.${eventAt})`,
+    `${url}/rest/v1/vehicle_assignments?select=customer_id,valid_from,valid_to&organization_id=eq.${organizationId}&vehicle_id=eq.${vehicle.id}&valid_from=lte.${eventAtParam}&or=(valid_to.is.null,valid_to.gte.${eventAtParam})`,
     { headers, cache: "no-store" },
   );
   const assignments = (await assignmentsResponse.json().catch(() => [])) as Array<{
