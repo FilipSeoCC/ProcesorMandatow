@@ -23,6 +23,10 @@ export type AuthorityContext = {
   signerName: string;
   signerPosition: string;
   confirmedAt: string;
+  amountGross: string;
+  currency: string;
+  paymentDueAt: string;
+  responseDueAt: string;
 };
 
 type DocumentRow = {
@@ -35,6 +39,10 @@ type DocumentRow = {
   responsible_tax_id: string;
   responsible_email: string;
   confirmed_at: string | null;
+  amount_gross: string | number | null;
+  currency: string | null;
+  payment_due_at: string | null;
+  response_due_at: string | null;
 };
 
 const normalizePlate = (value: string) =>
@@ -62,7 +70,7 @@ export async function loadAuthorityContext(
   documentId: string,
 ): Promise<AuthorityContext | null> {
   const documents = await fetchRows<DocumentRow>(
-    `${url}/rest/v1/mandate_documents?select=case_number,registration_number,event_at,letter_date,sender,responsible_name,responsible_tax_id,responsible_email,confirmed_at&id=eq.${encodeURIComponent(documentId)}&organization_id=eq.${member.organizationId}&limit=1`,
+    `${url}/rest/v1/mandate_documents?select=case_number,registration_number,event_at,letter_date,sender,responsible_name,responsible_tax_id,responsible_email,confirmed_at,amount_gross,currency,payment_due_at,response_due_at&id=eq.${encodeURIComponent(documentId)}&organization_id=eq.${member.organizationId}&limit=1`,
     secretKey,
   );
   const document = documents[0];
@@ -156,5 +164,12 @@ export async function loadAuthorityContext(
       membership?.display_name?.trim() || metadataName || member.email || "Osoba upoważniona",
     signerPosition: positionLabel(membership?.role || member.role),
     confirmedAt: document.confirmed_at ?? "",
+    amountGross:
+      document.amount_gross === null || document.amount_gross === undefined
+        ? ""
+        : String(document.amount_gross),
+    currency: document.currency ?? "PLN",
+    paymentDueAt: document.payment_due_at ?? "",
+    responseDueAt: document.response_due_at ?? "",
   };
 }

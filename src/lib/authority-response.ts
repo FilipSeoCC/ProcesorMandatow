@@ -1,20 +1,31 @@
-import PDFDocument from "pdfkit";
-import path from "node:path";
 import type { AuthorityContext } from "@/lib/authority-context";
+import {
+  PDF_COLORS,
+  PDF_PAGE,
+  cleanLine,
+  collectPdf,
+  createBrandPdf,
+  drawAddressCard,
+  drawDataGrid,
+  drawDocumentTitle,
+  drawFooter,
+  drawLetterhead,
+  drawNoticeBox,
+  drawSectionLabel,
+  drawSignature,
+  drawText,
+  formatDate,
+  formatDateTime,
+} from "@/lib/pdf-brand";
 
 export type AuthorityRecipient = {
   name: string;
   address: string;
 };
 
-const notoSans = path.join(
-  process.cwd(),
-  "src",
-  "assets",
-  "NotoSans-Regular.ttf",
-);
+const display = (value: string | null | undefined) =>
+  cleanLine(value, "Nie wskazano");
 
-const display = (value: string | null | undefined) => value?.trim() || "-";
 const escapeHtml = (value: string) =>
   value.replace(/[&<>"']/g, (character) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[
@@ -22,60 +33,27 @@ const escapeHtml = (value: string) =>
     ]!,
   );
 
-function formatDate(value: string) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf())
-    ? value
-    : new Intl.DateTimeFormat("pl-PL", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      }).format(date);
-}
-
-function formatDateTime(value: string) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf())
-    ? value
-    : new Intl.DateTimeFormat("pl-PL", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }).format(date);
-}
-
 function localityFromAddress(address: string) {
   const postalLocality = address.match(/\d{2}-\d{3}\s+([^,\n]+)\s*$/);
   if (postalLocality?.[1]) return postalLocality[1].trim();
-  return address.split(/[,\n]/).map((part) => part.trim()).filter(Boolean).at(-1) || "-";
+  return (
+    address
+      .split(/[,\n]/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+      .at(-1) || "Miejscowość"
+  );
 }
 
-function drawFlotaFlowHeader(document: PDFKit.PDFDocument) {
-  const x = 56;
-  const y = 45;
-  document.save();
-  document.roundedRect(x, y, 28, 28, 7).fill("#2563eb");
-  document.fillColor("#ffffff").font("NotoSans").fontSize(14).text("F", x, y + 5, {
-    width: 28,
-    align: "center",
-  });
-  document.fillColor("#0f172a").fontSize(14).text("FlotaFlow", x + 38, y + 2);
-  document
-    .fillColor("#64748b")
-    .fontSize(7)
-    .text("Biuro Obsługi Floty", x + 38, y + 19);
-  document
-    .strokeColor("#dbeafe")
-    .lineWidth(1)
-    .moveTo(x, y + 40)
-    .lineTo(539, y + 40)
-    .stroke();
-  document.restore();
-  document.y = y + 55;
+function vehicleName(context: AuthorityContext) {
+  return [context.vehicleBrand, context.vehicleModel, context.registrationNumber]
+    .map((value) => cleanLine(value))
+    .filter(Boolean)
+    .join(" • ");
+}
+
+function authorityReference(context: AuthorityContext) {
+  return cleanLine(context.caseNumber) || `FLF-${context.documentId.slice(0, 8).toUpperCase()}`;
 }
 
 export function buildAuthorityResponseText(
@@ -85,7 +63,7 @@ export function buildAuthorityResponseText(
   const vehicle = [context.vehicleBrand, context.vehicleModel]
     .filter(Boolean)
     .join(" ");
-  return `Miejscowość, data: ${localityFromAddress(context.organizationAddress)}, ${new Date().toLocaleDateString("pl-PL")}
+  return `Miejscowość, data: ${localityFromAddress(context.organizationAddress)}, ${formatDate(new Date().toISOString())}
 
 Nadawca:
 ${display(context.organizationName)}
@@ -106,7 +84,7 @@ Adres e-mail: ${display(context.responsibleEmail)}
 Adres zamieszkania / siedziby: ${display(context.responsibleAddress)}
 PESEL / NIP: ${display(context.responsibleTaxId)}
 Numer umowy: ${display(context.agreementNumber)}
-Nr prawa jazdy: -
+Nr prawa jazdy: Nie wskazano
 
 Wskazana osoba lub firma posiadała odpowiedzialność za użytkowanie pojazdu w podanym przedziale czasowym. W załączeniu przekazujemy kopię otrzymanego wezwania. Wszelką dalszą korespondencję w przedmiotowej sprawie prosimy kierować bezpośrednio do wyżej wskazanego użytkownika.
 
@@ -121,35 +99,136 @@ export function buildAuthorityResponsePdf(
   context: AuthorityContext,
   recipient: AuthorityRecipient,
 ) {
-  return new Promise<Buffer>((resolve, reject) => {
-    const document = new PDFDocument({
-      size: "A4",
-      margin: 56,
-      font: notoSans,
-      info: {
-        Title: `Wskazanie użytkownika pojazdu ${context.registrationNumber}`,
-        Author: context.organizationName,
-      },
-    });
-    const chunks: Buffer[] = [];
-    document.on("data", (chunk: Buffer) => chunks.push(chunk));
-    document.on("end", () => resolve(Buffer.concat(chunks)));
-    document.on("error", reject);
-    document.registerFont("NotoSans", notoSans);
-    drawFlotaFlowHeader(document);
-    document
-      .font("NotoSans")
-      .fillColor("#0f172a")
-      .fontSize(15)
-      .text("OŚWIADCZENIE - WSKAZANIE UŻYTKOWNIKA POJAZDU", {
-        align: "center",
-      });
-    document.moveDown(1).fontSize(9.5).text(buildAuthorityResponseText(context, recipient), {
-      align: "left",
-      lineGap: 1.5,
-    });
-    document.end();
+  const reference = authorityReference(context);
+  const organization = {
+    name: context.organizationName,
+    address: context.organizationAddress,
+    email: context.organizationEmail,
+    phone: context.organizationPhone,
+  };
+  const document = createBrandPdf({
+    Title: `Wskazanie użytkownika pojazdu ${context.registrationNumber}`,
+    Author: cleanLine(context.organizationName, "FlotaFlow"),
+    Subject: `Odpowiedź do organu, sprawa ${reference}`,
   });
+  const result = collectPdf(document);
+
+  drawLetterhead(document, organization, "Odpowiedź do organu");
+  drawDocumentTitle(
+    document,
+    "Oświadczenie o wskazaniu użytkownika pojazdu",
+    reference,
+    formatDate(new Date().toISOString()),
+  );
+
+  const cardGap = 12;
+  const cardWidth = (PDF_PAGE.contentWidth - cardGap) / 2;
+  drawAddressCard(document, {
+    label: "Nadawca",
+    name: context.organizationName,
+    lines: [context.organizationAddress, context.organizationEmail, context.organizationPhone],
+    x: PDF_PAGE.margin,
+    y: 188,
+    width: cardWidth,
+    height: 82,
+  });
+  drawAddressCard(document, {
+    label: "Adresat",
+    name: recipient.name,
+    lines: [recipient.address],
+    x: PDF_PAGE.margin + cardWidth + cardGap,
+    y: 188,
+    width: cardWidth,
+    height: 82,
+  });
+
+  drawSectionLabel(document, "Odpowiedź na wezwanie", 289);
+  drawText(
+    document,
+    `Dotyczy: wskazania użytkownika pojazdu nr rej. ${display(context.registrationNumber)}`,
+    PDF_PAGE.margin,
+    307,
+    {
+      size: 9.5,
+      color: PDF_COLORS.navy,
+      weight: "semibold",
+      width: PDF_PAGE.contentWidth,
+    },
+  );
+  document
+    .fillColor(PDF_COLORS.ink)
+    .font("NotoRegular")
+    .fontSize(8.8)
+    .text(
+      `Odpowiadając na wezwanie z dnia ${formatDate(context.letterDate)}, dotyczące zdarzenia zarejestrowanego w dniu ${formatDateTime(context.eventAt)} z udziałem pojazdu ${vehicleName(context) || "wskazanego w sprawie"}, oświadczamy, że pojazd znajdował się wówczas w dyspozycji niżej wskazanej osoby lub podmiotu na podstawie zawartej umowy.`,
+      PDF_PAGE.margin,
+      331,
+      {
+        width: PDF_PAGE.contentWidth,
+        lineGap: 2.2,
+        align: "justify",
+      },
+    );
+
+  drawSectionLabel(document, "Dane wskazanego użytkownika", 407);
+  drawDataGrid(
+    document,
+    [
+      { label: "Imię i nazwisko / nazwa", value: context.responsibleName, emphasis: true },
+      { label: "PESEL / NIP", value: context.responsibleTaxId },
+      { label: "Adres e-mail", value: context.responsibleEmail },
+      { label: "Adres zamieszkania / siedziby", value: context.responsibleAddress },
+      { label: "Pojazd", value: vehicleName(context) },
+      { label: "Numer umowy", value: context.agreementNumber },
+    ],
+    425,
+  );
+
+  drawNoticeBox(
+    document,
+    "Podstawa wskazania",
+    "Dane ustalono na podstawie historii wydania pojazdu i okresu obowiązywania przypisania w systemie zarządzania flotą.",
+    557,
+  );
+
+  document
+    .fillColor(PDF_COLORS.ink)
+    .font("NotoRegular")
+    .fontSize(8.7)
+    .text(
+      "Wskazana osoba lub firma odpowiadała za użytkowanie pojazdu w podanym przedziale czasowym. Wszelką dalszą korespondencję w przedmiotowej sprawie prosimy kierować bezpośrednio do wskazanego użytkownika.",
+      PDF_PAGE.margin,
+      637,
+      {
+        width: PDF_PAGE.contentWidth,
+        lineGap: 2.1,
+        align: "justify",
+      },
+    );
+
+  drawText(document, "ZAŁĄCZNIK", PDF_PAGE.margin, 700, {
+    size: 7.4,
+    color: PDF_COLORS.muted,
+    weight: "semibold",
+    characterSpacing: 0.8,
+  });
+  drawText(
+    document,
+    "Kopia otrzymanego wezwania / dokumentu źródłowego",
+    PDF_PAGE.margin,
+    715,
+    { size: 8.3, width: 245 },
+  );
+
+  drawSignature(document, {
+    name: context.signerName,
+    position: context.signerPosition,
+    organization: context.organizationName,
+    y: 685,
+  });
+  drawFooter(document, organization, reference);
+  document.end();
+  return result;
 }
 
 export function buildAuthorityReviewPackage(
@@ -159,7 +238,7 @@ export function buildAuthorityReviewPackage(
 ) {
   const detailsUrl = `${appUrl.replace(/\/$/, "")}/?document=${encodeURIComponent(context.documentId)}`;
   const letter = buildAuthorityResponseText(context, recipient);
-  const subject = `[DO WYSŁANIA DO URZĘDU] Wskazanie użytkownika pojazdu ${display(context.registrationNumber)} · sprawa ${display(context.caseNumber)}`;
+  const subject = `[DO WYSŁANIA DO URZĘDU] Wskazanie użytkownika pojazdu ${display(context.registrationNumber)} - sprawa ${display(context.caseNumber)}`;
   const text = `Dzień dobry ${display(context.signerName)},
 
 system przygotował osobny pakiet odpowiedzi do urzędu w sprawie ${display(context.caseNumber)}.
