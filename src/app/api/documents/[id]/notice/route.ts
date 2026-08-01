@@ -13,6 +13,24 @@ const notoSans = path.join(
   "NotoSans-Regular.ttf",
 );
 
+// Kept as vector drawing rather than an externally loaded image: it renders
+// sharply in PDF, needs no network access and is safe in a serverless bundle.
+function drawFlotaFlowLogo(document: PDFKit.PDFDocument) {
+  const x = 56;
+  const y = 52;
+  document.save();
+  document.roundedRect(x, y, 28, 28, 7).fill("#2563eb");
+  document.fillColor("#ffffff").font("NotoSans").fontSize(14).text("F", x, y + 5, {
+    width: 28,
+    align: "center",
+  });
+  document.fillColor("#0f172a").fontSize(14).text("FlotaFlow", x + 38, y + 2);
+  document.fillColor("#64748b").fontSize(7).text("Biuro Obsługi Floty", x + 38, y + 19);
+  document.strokeColor("#dbeafe").lineWidth(1).moveTo(x, y + 40).lineTo(539, y + 40).stroke();
+  document.restore();
+  document.y = y + 62;
+}
+
 function buildPdf(values: Record<string, string>) {
   return new Promise<Buffer>((resolve, reject) => {
     // PDFKit defaults to Helvetica, whose AFM metrics are loaded from its
@@ -24,6 +42,7 @@ function buildPdf(values: Record<string, string>) {
     document.on("end", () => resolve(Buffer.concat(chunks)));
     document.on("error", reject);
     document.registerFont("NotoSans", notoSans);
+    drawFlotaFlowLogo(document);
     document.font("NotoSans").fontSize(18).text("WEZWANIE DO ZAPŁATY", { align: "center" });
     document.moveDown(2).font("NotoSans").fontSize(11);
     document.text(`Data wystawienia: ${new Date().toLocaleDateString("pl-PL")}`);
