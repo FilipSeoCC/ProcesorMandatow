@@ -77,9 +77,18 @@ const pendingOcrStatuses = new Set(["uploaded", "processing"]);
 
 type UploadPage = { id: string; file: File; name: string };
 
-async function prepareCameraUpload(file: File) {
+function extensionOf(fileName: string) {
+  const match = fileName.match(/\.[^.]+$/);
+  return match ? match[0] : "";
+}
+
+async function prepareCameraUpload(file: File, displayName: string) {
+  const trimmedName = displayName.trim();
+  const namedWithOriginalExtension = trimmedName
+    ? `${trimmedName}${extensionOf(file.name)}`
+    : file.name;
   if (!file.type.startsWith("image/") || file.size <= 1_000_000)
-    return { blob: file as Blob, name: file.name };
+    return { blob: file as Blob, name: namedWithOriginalExtension };
 
   const sourceUrl = URL.createObjectURL(file);
   try {
@@ -96,10 +105,10 @@ async function prepareCameraUpload(file: File) {
     canvas.getContext("2d")?.drawImage(image, 0, 0, canvas.width, canvas.height);
     const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.72));
     if (!blob || blob.size >= file.size)
-      return { blob: file as Blob, name: file.name };
+      return { blob: file as Blob, name: namedWithOriginalExtension };
     return {
       blob,
-      name: `${file.name.replace(/\.[^.]+$/, "") || "skan"}.jpg`,
+      name: `${trimmedName || file.name.replace(/\.[^.]+$/, "") || "skan"}.jpg`,
     };
   } finally {
     URL.revokeObjectURL(sourceUrl);
@@ -1043,7 +1052,7 @@ export default function MandatyWorkspace() {
     setUploadError(null);
     try {
       const preparedFiles = await Promise.all(
-        uploadedPages.map((page) => prepareCameraUpload(page.file)),
+        uploadedPages.map((page) => prepareCameraUpload(page.file, page.name)),
       );
       const payloadSize = preparedFiles.reduce((sum, file) => sum + file.blob.size, 0);
       if (payloadSize > 4 * 1024 * 1024)
