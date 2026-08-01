@@ -4,10 +4,10 @@ import { getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export const runtime = "nodejs";
 
-const allRoles = ["admin", "dispatcher", "office", "scanner", "viewer"] as const;
-
 export async function GET(request: Request) {
-  const member = await verifyMember(request, [...allRoles]);
+  // This route exposes employee names and e-mail addresses. It is not needed
+  // by scanner/viewer accounts and must not become an internal address book.
+  const member = await verifyMember(request, ["admin"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();

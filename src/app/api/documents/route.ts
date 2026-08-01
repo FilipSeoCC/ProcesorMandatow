@@ -37,8 +37,13 @@ export async function GET(request: Request) {
       { error: "Supabase nie jest skonfigurowany." },
       { status: 503 },
     );
-  const select =
-    "id,status,created_at,uploaded_by,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,ocr_text,responsible_name,responsible_tax_id,responsible_email,confirmed_at,resolved_at,mandate_document_pages(storage_path,page_number)";
+  // Scanner/viewer accounts only need a work list and preview. OCR text and
+  // customer identifiers can contain PESEL/NIP, address or other personal
+  // data, so only office/admin receive them.
+  const mayReadSensitiveData = ["admin", "office"].includes(member.role);
+  const select = mayReadSensitiveData
+    ? "id,status,created_at,uploaded_by,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,ocr_text,responsible_name,responsible_tax_id,responsible_email,confirmed_at,resolved_at,mandate_document_pages(storage_path,page_number)"
+    : "id,status,created_at,uploaded_by,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,confirmed_at,resolved_at,mandate_document_pages(storage_path,page_number)";
   const response = await fetch(
     `${url}/rest/v1/mandate_documents?select=${encodeURIComponent(select)}&organization_id=eq.${member.organizationId}&order=created_at.desc&limit=50`,
     {

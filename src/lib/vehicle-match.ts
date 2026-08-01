@@ -45,7 +45,7 @@ export async function matchVehicleCustomer(
   // this filter match nothing even when a covering assignment exists.
   const eventAtParam = encodeURIComponent(eventAt);
   const assignmentsResponse = await fetch(
-    `${url}/rest/v1/vehicle_assignments?select=customer_id,valid_from,valid_to&organization_id=eq.${organizationId}&vehicle_id=eq.${vehicle.id}&valid_from=lte.${eventAtParam}&or=(valid_to.is.null,valid_to.gte.${eventAtParam})`,
+    `${url}/rest/v1/vehicle_assignments?select=customer_id,valid_from,valid_to&organization_id=eq.${organizationId}&vehicle_id=eq.${vehicle.id}&valid_from=lte.${eventAtParam}&or=(valid_to.is.null,valid_to.gt.${eventAtParam})&order=valid_from.desc&limit=1`,
     { headers, cache: "no-store" },
   );
   const assignments = (await assignmentsResponse.json().catch(() => [])) as Array<{

@@ -9,12 +9,19 @@ function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function isoDate(value: unknown) {
+  const input = text(value, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(input) && !Number.isNaN(new Date(`${input}T00:00:00Z`).valueOf())
+    ? input
+    : null;
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const member = await verifyMember(request, ["admin", "office", "scanner"]);
+  const member = await verifyMember(request, ["admin", "office"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const body = await request.json().catch(() => null);
@@ -28,6 +35,22 @@ export async function PATCH(
   const responsibleName = text(body.responsibleName, 200);
   const responsibleTaxId = text(body.responsibleTaxId, 20);
   const responsibleEmail = text(body.responsibleEmail, 200);
+  const rawAmount = body.amountGross;
+  const amountGross = rawAmount === "" || rawAmount === null || rawAmount === undefined
+    ? null
+    : typeof rawAmount === "number" && Number.isFinite(rawAmount) && rawAmount >= 0 && rawAmount <= 1_000_000
+      ? Math.round(rawAmount * 100) / 100
+      : Number.NaN;
+  if (Number.isNaN(amountGross))
+    return NextResponse.json({ error: "Kwota musi być liczbą od 0 do 1 000 000." }, { status: 422 });
+  const currency = text(body.currency, 3).toUpperCase() || "PLN";
+  if (!/^[A-Z]{3}$/.test(currency))
+    return NextResponse.json({ error: "Waluta musi mieć kod ISO, np. PLN." }, { status: 422 });
+  const paymentDueAt = isoDate(body.paymentDueAt);
+  const responseDueAt = isoDate(body.responseDueAt);
+  const financialStatus = text(body.financialStatus, 32) || "unknown";
+  if (!["unknown", "not_applicable", "pending_review", "awaiting_payment", "settled", "cancelled"].includes(financialStatus))
+    return NextResponse.json({ error: "Nieprawidłowy status rozliczenia." }, { status: 422 });
 
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
@@ -53,6 +76,13 @@ export async function PATCH(
         responsible_name: responsibleName,
         responsible_tax_id: responsibleTaxId,
         responsible_email: responsibleEmail,
+        amount_gross: amountGross,
+        currency,
+        payment_due_at: paymentDueAt,
+        response_due_at: responseDueAt,
+        financial_status: financialStatus,
+        amount_confirmed_at: new Date().toISOString(),
+        amount_confirmed_by: member.userId,
         confirmed_at: new Date().toISOString(),
         confirmed_by: member.userId,
       }),
@@ -78,7 +108,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const member = await verifyMember(request, ["admin", "office", "scanner"]);
+  const member = await verifyMember(request, ["admin", "office"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();

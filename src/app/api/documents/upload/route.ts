@@ -34,6 +34,17 @@ function supportedExtension(file: File) {
 }
 
 export async function POST(request: Request) {
+  const { url: supabaseUrl, secretKey: serviceKey } = getSupabaseServerEnv();
+  // Authenticate before parsing multipart data. Otherwise an unauthenticated
+  // caller can force the function to buffer a large request body.
+  const member = supabaseUrl && serviceKey
+    ? await verifyMember(request, ["admin", "office", "scanner"])
+    : null;
+  if (supabaseUrl && serviceKey && !member)
+    return NextResponse.json({ error: "Brak uprawnień do przesyłania dokumentów." }, { status: 401 });
+  const declaredLength = Number(request.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declaredLength) && declaredLength > 52 * 1024 * 1024)
+    return NextResponse.json({ error: "Dokument przekracza łączny limit 50 MB." }, { status: 413 });
   const form = await request.formData().catch(() => null);
   const files =
     form
@@ -62,7 +73,6 @@ export async function POST(request: Request) {
       { status: 413 },
     );
 
-  const { url: supabaseUrl, secretKey: serviceKey } = getSupabaseServerEnv();
   if (!supabaseUrl || !serviceKey)
     return NextResponse.json({
       mode: "demo",
@@ -70,7 +80,6 @@ export async function POST(request: Request) {
       pages: files.length,
     });
 
-  const member = await verifyMember(request, ["admin", "office", "scanner"]);
   if (!member)
     return NextResponse.json(
       { error: "Brak uprawnień do przesyłania dokumentów." },

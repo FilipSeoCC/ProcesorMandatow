@@ -74,6 +74,7 @@ export async function GET(request: Request) {
     }
   }
 
+  const mayReadCustomerContact = ["admin", "dispatcher", "office"].includes(member.role);
   const result = vehicles.map((vehicle) => {
     const assignment = assignmentByVehicle.get(vehicle.id);
     const customer = assignment ? customerById.get(assignment.customer_id) : undefined;
@@ -83,8 +84,8 @@ export async function GET(request: Request) {
       model: vehicle.model,
       registration: vehicle.registration_number,
       customer: customer?.name ?? (assignment ? "" : "Flota wewnętrzna"),
-      customerEmail: customer?.email ?? "",
-      customerTaxId: customer?.tax_id ?? "",
+      customerEmail: mayReadCustomerContact ? customer?.email ?? "" : "",
+      customerTaxId: mayReadCustomerContact ? customer?.tax_id ?? "" : "",
       assignedAt: assignment?.valid_from ?? "",
     };
   });
@@ -216,23 +217,39 @@ export async function POST(request: Request) {
   // the exact instant it started (e.g. re-saving without changing the date)
   // would create a zero-width/duplicate range and violate the constraint.
   const existingAssignmentResponse = await fetch(
-    `${url}/rest/v1/vehicle_assignments?select=id&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_to=is.null&limit=1`,
+    `${url}/rest/v1/vehicle_assignments?select=id,customer_id,valid_from&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_to=is.null&limit=1`,
     { headers, cache: "no-store" },
   );
   const existingAssignments = existingAssignmentResponse.ok
-    ? ((await existingAssignmentResponse.json()) as Array<{ id: string }>)
+    ? ((await existingAssignmentResponse.json()) as Array<{ id: string; customer_id: string; valid_from: string }>)
     : [];
-  const existingAssignmentId = existingAssignments[0]?.id ?? null;
+  const currentAssignment = existingAssignments[0] ?? null;
+  const sameAssignment = currentAssignment
+    && currentAssignment.customer_id === customerId
+    && new Date(currentAssignment.valid_from).valueOf() === assignedAt.valueOf();
+  if (currentAssignment && !sameAssignment && assignedAt <= new Date(currentAssignment.valid_from))
+    return NextResponse.json(
+      { error: "Nowe przypisanie musi zaczynać się po rozpoczęciu obecnego najmu. Historię wsteczną popraw przez dedykowaną edycję." },
+      { status: 422 },
+    );
 
-  const assignmentResponse = existingAssignmentId
-    ? await fetch(
-        `${url}/rest/v1/vehicle_assignments?id=eq.${existingAssignmentId}&organization_id=eq.${member.organizationId}`,
-        {
-          method: "PATCH",
-          headers: { ...jsonHeaders, Prefer: "return=minimal" },
-          body: JSON.stringify({ customer_id: customerId, valid_from: assignedAtIso }),
-        },
-      )
+  // Do not rewrite an open assignment: the history is needed to identify the
+  // correct customer on the mandate event timestamp.
+  if (currentAssignment && !sameAssignment) {
+    const closeResponse = await fetch(
+      `${url}/rest/v1/vehicle_assignments?id=eq.${currentAssignment.id}&organization_id=eq.${member.organizationId}`,
+      {
+        method: "PATCH",
+        headers: { ...jsonHeaders, Prefer: "return=minimal" },
+        body: JSON.stringify({ valid_to: assignedAtIso }),
+      },
+    );
+    if (!closeResponse.ok)
+      return NextResponse.json({ error: "Nie udało się zamknąć poprzedniego przypisania auta." }, { status: 502 });
+  }
+
+  const assignmentResponse = sameAssignment
+    ? { ok: true }
     : await fetch(`${url}/rest/v1/vehicle_assignments`, {
         method: "POST",
         headers: { ...jsonHeaders, Prefer: "return=minimal" },

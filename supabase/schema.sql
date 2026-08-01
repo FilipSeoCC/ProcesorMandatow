@@ -94,6 +94,25 @@ alter table public.mandate_documents add column if not exists review_package_sen
 alter table public.mandate_documents add column if not exists review_package_sent_by uuid references auth.users(id) on delete set null;
 alter table public.mandate_documents add column if not exists review_package_email text not null default '';
 alter table public.mandate_documents add column if not exists review_package_resend_id text not null default '';
+-- Financial data is kept separately from the response deadline: a request to
+-- identify the driver is not necessarily a fine payable by the fleet.
+alter table public.mandate_documents add column if not exists amount_gross numeric(12,2);
+alter table public.mandate_documents add column if not exists currency char(3) not null default 'PLN';
+alter table public.mandate_documents add column if not exists payment_due_at date;
+alter table public.mandate_documents add column if not exists response_due_at date;
+alter table public.mandate_documents add column if not exists financial_status text not null default 'unknown'
+  check(financial_status in ('unknown','not_applicable','pending_review','awaiting_payment','settled','cancelled'));
+alter table public.mandate_documents add column if not exists amount_confirmed_at timestamptz;
+alter table public.mandate_documents add column if not exists amount_confirmed_by uuid references auth.users(id) on delete set null;
+
+create table if not exists public.mandate_status_events (
+  id bigint generated always as identity primary key,
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  document_id uuid not null references public.mandate_documents(id) on delete cascade,
+  previous_status text, next_status text not null,
+  actor_id uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now()
+);
 create table if not exists public.mandate_document_pages (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   document_id uuid not null, page_number integer not null check(page_number between 1 and 10), storage_path text not null unique,
@@ -154,6 +173,7 @@ alter table public.customers enable row level security; alter table public.vehic
 alter table public.vehicle_assignments enable row level security; alter table public.delivery_orders enable row level security;
 alter table public.route_plans enable row level security; alter table public.route_stops enable row level security; alter table public.audit_events enable row level security;
 alter table public.mandate_documents enable row level security; alter table public.mandate_document_pages enable row level security;
+alter table public.mandate_status_events enable row level security;
 
 drop policy if exists organizations_read on public.organizations; drop policy if exists organizations_admin on public.organizations;
 drop policy if exists members_read on public.organization_members; drop policy if exists members_admin on public.organization_members;
@@ -166,6 +186,7 @@ drop policy if exists stops_read on public.route_stops; drop policy if exists st
 drop policy if exists documents_read on public.mandate_documents; drop policy if exists documents_write on public.mandate_documents;
 drop policy if exists document_pages_read on public.mandate_document_pages; drop policy if exists document_pages_write on public.mandate_document_pages;
 drop policy if exists audit_read on public.audit_events; drop policy if exists audit_insert on public.audit_events;
+drop policy if exists mandate_status_events_read on public.mandate_status_events;
 
 create policy organizations_read on public.organizations for select using(public.is_org_member(id));
 create policy organizations_admin on public.organizations for update using(public.has_org_role(id,array['admin']::public.app_role[]));
@@ -189,6 +210,7 @@ create policy document_pages_read on public.mandate_document_pages for select us
 create policy document_pages_write on public.mandate_document_pages for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
 create policy audit_read on public.audit_events for select using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());
+create policy mandate_status_events_read on public.mandate_status_events for select using(public.has_org_role(organization_id,array['admin','office']::public.app_role[]));
 
 do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane'); exception when duplicate_object then null; end $$;
 create table if not exists public.bug_reports (
