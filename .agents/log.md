@@ -33,3 +33,27 @@ See AGENTS.md for how to use this file.
 - Added `vercel.json` with daily cron schedules for **both** this and the existing OCR retry queue — neither had an actual trigger configured before this (I'd flagged the OCR queue's missing trigger in an earlier log entry). Note: Vercel Hobby plan hard-rejects any cron schedule more frequent than once/day — confirmed via Vercel's own docs, don't try to tighten these without checking Filip's plan tier first.
 - **`CRON_SECRET` env var still isn't set in Vercel** — both cron endpoints 401 until it is. This blocks both the OCR retry queue and the new rematch sweep from doing anything.
 - Added `plausibleName` in `workspace.tsx` (client-side), same soft-signal pattern as the OCR plate/date checks — flags the manually-edited "Nazwa / imię i nazwisko" field via the existing `warning` style when it doesn't look like a name (digits, single char, stray symbols), without rejecting real Polish names/diacritics/hyphenated surnames/company names. This field is manually entered or comes from the DB match, never from OCR — no OCR-side name extraction exists or is planned (documents don't contain the renter's name, that's the whole reason plate+date matching exists).
+
+## 2026-08-01 — Claude — Frontend for "send review package to employee" (Filip: Claude=frontend, Codex=backend)
+
+Filip asked for this split explicitly: I built the frontend in `workspace.tsx` against the contract below; **the backend endpoint doesn't exist yet** — that's Codex's part, per Filip's own message describing the flow (OCR done → matched client → employee gets a ready-to-forward client email + original scan, employee reviews and forwards manually, system never emails the client directly).
+
+**Frontend contract I built against** (adjust and tell me here if this needs to change):
+- `POST /api/documents/{documentId}/send-review-package`
+- Request body (optional): `{ "recipientEmail": "someone@firma.pl" }` — omitted when the reviewer leaves the field blank (defaults to `account.email` in the confirm dialog, but they can clear/change it); backend should fall back to `MANDATE_REVIEW_EMAIL` per Codex's own earlier spec if empty.
+- Success response: `{ "ok": true, ... }` — frontend doesn't currently read specific fields back beyond `response.ok`, just refetches the document list after (`loadDocuments`), so whatever shape works for you is fine as long as it's `200` on success.
+- Error response: `{ "error": "human-readable message" }` with non-2xx status — frontend surfaces `data.error` directly to the user, so make it Polish/user-facing, not a stack trace.
+- Expects a `review_package_sent_at` (timestamptz, nullable) column on `mandate_documents`, included in the `select=` of `GET /api/documents` (list) — used to show "Wyślij ponownie" instead of "Wyślij pakiet do pracownika" and a last-sent tooltip. If you name it differently, tell me here and I'll adjust the one line in `workspace.tsx` that reads `document.review_package_sent_at`.
+
+**Frontend gating** (button only appears/enables when ALL of these hold — mirrors Codex's stated criteria, but I additionally gated on `confirmed_at` since this sits right next to the existing "Pobierz wezwanie PDF" button, which already requires it):
+- case `confirmed_at` is set (reviewer already clicked "Zatwierdź dane"),
+- `registration_number`, `event_at`, `responsible_name`, `responsible_email` all present.
+- When any of the last four are missing (rare — confirming without a match), the button is replaced by inline text listing exactly what's missing, not just grayed out.
+
+**UX decisions** (used the `ui-ux-pro-max` skill for this, per Filip's request):
+- Real confirmation modal before sending (not a bare click) — this fires an email with a client's PII, so it gets the same weight as other consequential actions in this app. Modal explicitly states "nie bezpośrednio do klienta" (not directly to the client) since that's the exact misunderstanding-risk Filip flagged, and shows a summary (plate/date/matched client) so the reviewer has a last sanity check.
+- Recipient email field in the modal is editable, prefilled with the logged-in reviewer's own email — matches the common case (reviewer forwards it themself) while still allowing a different employee's address.
+- Reused the existing `.modalLayer`/`.helpModal` CSS classes and structure (same as the help/settings modals) rather than inventing new modal styling, for visual consistency.
+- Button copy is intentionally explicit about the mechanism ("Wyślij pakiet do pracownika", not something client-facing-sounding like "Wyślij wezwanie") — the whole point Filip raised is that this must never read as "sends to the client."
+
+Verified: `tsc --noEmit` clean, dev server boots and serves `/` with no console errors. Could not verify the actual button/modal visually — the case-detail view requires a logged-in session and I don't handle credentials.

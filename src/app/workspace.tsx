@@ -22,6 +22,7 @@ import {
   MoreHorizontal,
   ScanLine,
   Search,
+  Send,
   ShieldCheck,
   Trash2,
   Upload,
@@ -65,6 +66,7 @@ type CaseItem = {
   responsibleEmail?: string;
   confirmedAt?: string | null;
   resolvedAt?: string | null;
+  reviewPackageSentAt?: string | null;
 };
 
 // Statuses the background OCR job can still move on from by itself —
@@ -273,6 +275,10 @@ export default function MandatyWorkspace() {
   const [matchMessage, setMatchMessage] = useState<string | null>(null);
   const [matchOk, setMatchOk] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [sendPackageOpen, setSendPackageOpen] = useState(false);
+  const [sendPackageRecipient, setSendPackageRecipient] = useState("");
+  const [sendingPackage, setSendingPackage] = useState(false);
+  const [sendPackageError, setSendPackageError] = useState<string | null>(null);
   const [caseMenuOpen, setCaseMenuOpen] = useState(false);
   const [deletingCase, setDeletingCase] = useState(false);
   const [selectMode, setSelectMode] = useState(false);
@@ -429,6 +435,7 @@ export default function MandatyWorkspace() {
         responsible_email: string;
         confirmed_at: string | null;
         resolved_at: string | null;
+        review_package_sent_at?: string | null;
       }>;
     };
     if (!result.documents?.length) return null;
@@ -466,6 +473,7 @@ export default function MandatyWorkspace() {
       responsibleEmail: document.responsible_email,
       confirmedAt: document.confirmed_at,
       resolvedAt: document.resolved_at,
+      reviewPackageSentAt: document.review_package_sent_at ?? null,
     }));
     const justFinished = mapped.find((item) => {
       const prior = caseItems.find((existing) => existing.id === item.id);
@@ -697,6 +705,66 @@ export default function MandatyWorkspace() {
       );
     } finally {
       setMatching(false);
+    }
+  }
+
+  // What's stopping "Wyslij pakiet do pracownika" right now — shown near the
+  // button instead of just graying it out, so the reviewer knows exactly
+  // what to fix rather than guessing. Only surfaced once the case is
+  // confirmed (same gate as the notice-PDF button below) — before that,
+  // "Zatwierdź dane" is already the obvious next step.
+  const sendPackageBlockers = selected.confirmedAt
+    ? [
+        !selected.plate || selected.plate === "OCR…" ? "numer rejestracyjny" : null,
+        !selected.eventAt || selected.eventAt === "Oczekuje na OCR"
+          ? "data zdarzenia"
+          : null,
+        !draft.responsibleName ? "dopasowany odbiorca" : null,
+        !draft.responsibleEmail ? "e-mail odbiorcy" : null,
+      ].filter((item): item is string => Boolean(item))
+    : [];
+
+  function openSendPackage() {
+    setSendPackageError(null);
+    setSendPackageRecipient(account?.email || "");
+    setSendPackageOpen(true);
+  }
+
+  async function sendReviewPackage() {
+    if (!selected.documentId || sendingPackage) return;
+    setSendingPackage(true);
+    setSendPackageError(null);
+    try {
+      const response = await fetch(
+        `/api/documents/${selected.documentId}/send-review-package`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            sendPackageRecipient.trim()
+              ? { recipientEmail: sendPackageRecipient.trim() }
+              : {},
+          ),
+        },
+      );
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się wysłać wiadomości.");
+      setSendPackageOpen(false);
+      setToast({
+        id: Date.now(),
+        success: true,
+        message: "Sprawa została wysłana do weryfikacji.",
+      });
+      await loadDocuments(true);
+    } catch (reason) {
+      setSendPackageError(
+        reason instanceof Error
+          ? reason.message
+          : "Nie udało się wysłać wiadomości.",
+      );
+    } finally {
+      setSendingPackage(false);
     }
   }
 
@@ -1729,6 +1797,32 @@ export default function MandatyWorkspace() {
                             <FileDown size={18} /> Pobierz wezwanie PDF
                           </a>
                         )}
+                        {selected.confirmedAt &&
+                          selected.documentId &&
+                          (sendPackageBlockers.length > 0 ? (
+                            <span
+                              className={styles.uploadError}
+                              title={`Uzupełnij: ${sendPackageBlockers.join(", ")}`}
+                            >
+                              Brakuje: {sendPackageBlockers.join(", ")}
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className={styles.secondaryButton}
+                              onClick={openSendPackage}
+                              title={
+                                selected.reviewPackageSentAt
+                                  ? `Ostatnio wysłano: ${new Date(selected.reviewPackageSentAt).toLocaleString("pl-PL", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+                                  : undefined
+                              }
+                            >
+                              <Send size={18} />
+                              {selected.reviewPackageSentAt
+                                ? "Wyślij ponownie"
+                                : "Wyślij pakiet do pracownika"}
+                            </button>
+                          ))}
                         <button
                           type="button"
                           className={styles.primaryButton}
@@ -1786,6 +1880,81 @@ export default function MandatyWorkspace() {
           >
             <X size={15} />
           </button>
+        </div>
+      )}
+
+      {sendPackageOpen && (
+        <div
+          className={styles.modalLayer}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="send-package-title"
+        >
+          <button
+            className={styles.modalBackdrop}
+            onClick={() => !sendingPackage && setSendPackageOpen(false)}
+            aria-label="Zamknij okno"
+          />
+          <div className={styles.helpModal}>
+            <header>
+              <div>
+                <span>Sprawa {selected.id}</span>
+                <h2 id="send-package-title">Wyślij pakiet do pracownika</h2>
+              </div>
+              <button
+                onClick={() => !sendingPackage && setSendPackageOpen(false)}
+                aria-label="Zamknij"
+              >
+                <X size={21} />
+              </button>
+            </header>
+            <p>
+              Wiadomość trafi na e-mail pracownika — <strong>nie bezpośrednio
+              do klienta</strong>. Będzie zawierać skan wezwania i gotowy
+              szablon do przekazania klientowi; przed przesłaniem dalej warto
+              go jeszcze sprawdzić.
+            </p>
+            <ul>
+              <li>
+                <strong>Pojazd:</strong> {selected.plate}
+              </li>
+              <li>
+                <strong>Data zdarzenia:</strong> {selected.eventAt}
+              </li>
+              <li>
+                <strong>Dopasowany klient:</strong> {draft.responsibleName}
+              </li>
+            </ul>
+            <div className={styles.formGrid}>
+              <Field
+                label="Adres e-mail pracownika"
+                value={sendPackageRecipient}
+                onChange={setSendPackageRecipient}
+                wide
+              />
+            </div>
+            {sendPackageError && (
+              <p className={styles.uploadError}>{sendPackageError}</p>
+            )}
+            <footer>
+              <button
+                type="button"
+                className={styles.secondaryButton}
+                onClick={() => setSendPackageOpen(false)}
+                disabled={sendingPackage}
+              >
+                Anuluj
+              </button>
+              <button
+                className={styles.primaryButton}
+                onClick={sendReviewPackage}
+                disabled={sendingPackage}
+              >
+                <Send size={18} />
+                {sendingPackage ? "Wysyłam…" : "Wyślij"}
+              </button>
+            </footer>
+          </div>
         </div>
       )}
 
