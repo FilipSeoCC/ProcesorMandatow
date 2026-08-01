@@ -248,9 +248,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Nie udało się zamknąć poprzedniego przypisania auta." }, { status: 502 });
   }
 
-  const assignmentResponse = sameAssignment
-    ? { ok: true }
-    : await fetch(`${url}/rest/v1/vehicle_assignments`, {
+  if (sameAssignment)
+    return NextResponse.json({
+      vehicle: { id: vehicleId, brand, model, registration, customer: customerName, assignedAt: assignedAtIso },
+    });
+
+  const assignmentResponse = await fetch(`${url}/rest/v1/vehicle_assignments`, {
         method: "POST",
         headers: { ...jsonHeaders, Prefer: "return=minimal" },
         body: JSON.stringify({
