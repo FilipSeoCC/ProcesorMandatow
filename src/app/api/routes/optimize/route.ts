@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     const client = gcpWorkloadIdentityClient(audience);
     const { token } = await client.getAccessToken();
     if (!token) throw new Error("ROUTE_OPTIMIZATION_AUTH_FAILED");
-    const response = await fetch(`https://routeoptimization.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/global:optimizeTours`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(googleRequest), signal: AbortSignal.timeout(20_000), cache: "no-store" });
+    const response = await fetch(`https://routeoptimization.googleapis.com/v1/projects/${encodeURIComponent(projectId)}:optimizeTours`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(googleRequest), signal: AbortSignal.timeout(20_000), cache: "no-store" });
     if (!response.ok) {
       const errorBody = await response.text().catch(() => "");
       throw new Error(`Google Route Optimization: ${response.status} ${errorBody.slice(0, 500)}`);
