@@ -56,17 +56,14 @@ function plausiblePlate(candidate: string) {
 
 // Same idea as plausiblePlate: a loose sanity check on the other value that
 // feeds matchVehicleCustomer, not a hard validity rule. A mandate event
-// can't be in the future (a misread year/day swap is a common OCR failure
-// mode and produces exactly that), and anything more than a few years old
-// is far more likely a misread than a genuinely aged case reaching this
-// system now.
+// genuinely can be old (slow postal/court process), so age alone proves
+// nothing — but it can never be in the future, and a future date is exactly
+// what a misread day/month/year swap produces.
 function plausibleEventDate(iso: string) {
   const date = new Date(iso);
   if (Number.isNaN(date.valueOf())) return false;
-  const now = Date.now();
   const oneDayMs = 24 * 60 * 60 * 1000;
-  const threeYearsMs = 3 * 365 * oneDayMs;
-  return date.getTime() <= now + oneDayMs && date.getTime() >= now - threeYearsMs;
+  return date.getTime() <= Date.now() + oneDayMs;
 }
 
 // withTime also looks for a "godz. HH:MM" nearby and folds it into the
