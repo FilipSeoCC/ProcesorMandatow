@@ -17,7 +17,10 @@ const notoSans = path.join(
 
 function buildPdf(values: Record<string, string>) {
   return new Promise<Buffer>((resolve, reject) => {
-    const document = new PDFDocument({ size: "A4", margin: 56 });
+    // PDFKit defaults to Helvetica, whose AFM metrics are loaded from its
+    // package at runtime. Serverless bundles may omit those files, so set the
+    // bundled Unicode font as the initial font before PDFKit creates a page.
+    const document = new PDFDocument({ size: "A4", margin: 56, font: notoSans });
     const chunks: Buffer[] = [];
     document.on("data", (chunk: Buffer) => chunks.push(chunk));
     document.on("end", () => resolve(Buffer.concat(chunks)));
