@@ -1,8 +1,7 @@
 import "server-only";
-import { ExternalAccountClient } from "google-auth-library";
-import { getVercelOidcToken } from "@vercel/oidc";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 import { matchVehicleCustomer } from "@/lib/vehicle-match";
+import { gcpWorkloadIdentityClient } from "@/lib/gcp-oidc";
 
 type OcrFile = { name: string; type: string; bytes: ArrayBuffer };
 type ExtractedFields = {
@@ -21,31 +20,6 @@ function documentAiConfig() {
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
   if (!audience || !processorId || !projectId) return null;
   return { audience, processorId, location, projectId };
-}
-
-// Vercel OIDC federation: exchanges VERCEL_OIDC_TOKEN for a short-lived GCP
-// access token via Workload Identity Federation. No service account key
-// involved (blocked by org policy iam.disableServiceAccountKeyCreation).
-function workloadIdentityClient(audience: string) {
-  const client = ExternalAccountClient.fromJSON({
-    type: "external_account",
-    audience,
-    subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
-    token_url: "https://sts.googleapis.com/v1/token",
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-    subject_token_supplier: {
-      // process.env.VERCEL_OIDC_TOKEN only exists at build time; inside a
-      // running Vercel Function the token instead arrives on the request as
-      // the x-vercel-oidc-token header, which this helper reads for us.
-      getSubjectToken: async () => {
-        const token = await getVercelOidcToken();
-        if (!token) throw new Error("VERCEL_OIDC_TOKEN missing");
-        return token;
-      },
-    },
-  });
-  if (!client) throw new Error("OCR_WIF_CONFIG_INVALID");
-  return client;
 }
 
 const datePattern =
@@ -142,7 +116,7 @@ export function extractMandateFields(rawText: string): ExtractedFields {
 async function readWithDocumentAi(file: OcrFile) {
   const config = documentAiConfig();
   if (!config) throw new Error("OCR_NOT_CONFIGURED");
-  const client = workloadIdentityClient(config.audience);
+  const client = gcpWorkloadIdentityClient(config.audience);
   const { token } = await client.getAccessToken();
   if (!token) throw new Error("OCR_AUTH_FAILED");
   const endpoint = `https://${config.location}-documentai.googleapis.com/v1/projects/${config.projectId}/locations/${config.location}/processors/${config.processorId}:process`;

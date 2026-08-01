@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
+import { gcpWorkloadIdentityClient } from "@/lib/gcp-oidc";
 
 export const runtime = "nodejs";
 
@@ -49,17 +50,25 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Nieprawidłowy JSON." }, { status: 400 }); }
   if (!valid(body)) return NextResponse.json({ error: "Podaj od 2 do 20 poprawnych punktów dostawy." }, { status: 422 });
 
-  const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
+  const audience = process.env.GOOGLE_WIF_AUDIENCE;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
-  if (!apiKey || !projectId) return NextResponse.json(demo(body));
+  if (!audience || !projectId) return NextResponse.json(demo(body));
   const member = await verifyMember(request, ["admin", "dispatcher"]);
   if (!member) return NextResponse.json({ error: "Zaloguj się jako administrator lub dyspozytor, aby użyć Google." }, { status: 401 });
 
   const now = new Date();
   const googleRequest = { model: { globalStartTime: now.toISOString(), globalEndTime: new Date(now.getTime() + 16 * 60 * 60 * 1000).toISOString(), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s` }] })), vehicles: [{ label: "Wadim", startLocation: body.depot, ...(body.returnToDepot === false ? {} : { endLocation: body.depot }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
   try {
-    const response = await fetch(`https://routeoptimization.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/global:optimizeTours`, { method: "POST", headers: { "Content-Type": "application/json", "X-Goog-Api-Key": apiKey }, body: JSON.stringify(googleRequest), signal: AbortSignal.timeout(20_000), cache: "no-store" });
-    if (!response.ok) throw new Error(`Google Route Optimization: ${response.status}`);
+    // Route Optimization API doesn't accept API keys — it requires a full
+    // OAuth2/IAM principal, so we reuse the same WIF client as Document AI.
+    const client = gcpWorkloadIdentityClient(audience);
+    const { token } = await client.getAccessToken();
+    if (!token) throw new Error("ROUTE_OPTIMIZATION_AUTH_FAILED");
+    const response = await fetch(`https://routeoptimization.googleapis.com/v1/projects/${encodeURIComponent(projectId)}/locations/global:optimizeTours`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify(googleRequest), signal: AbortSignal.timeout(20_000), cache: "no-store" });
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      throw new Error(`Google Route Optimization: ${response.status} ${errorBody.slice(0, 500)}`);
+    }
     const result = await response.json() as { routes?: Array<{ visits?: Array<{ shipmentIndex?: number }>; metrics?: { travelDistanceMeters?: number; totalDuration?: string } }>; skippedShipments?: Array<{ index?: number }> };
     const route = result.routes?.[0];
     const orderedStopIds = (route?.visits ?? []).flatMap((visit) => visit.shipmentIndex === undefined ? [] : [body.stops[visit.shipmentIndex]?.id]).filter(Boolean);
