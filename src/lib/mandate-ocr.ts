@@ -54,6 +54,21 @@ function plausiblePlate(candidate: string) {
   return /^[A-Z][A-Z0-9]{3,7}$/.test(normalized);
 }
 
+// Same idea as plausiblePlate: a loose sanity check on the other value that
+// feeds matchVehicleCustomer, not a hard validity rule. A mandate event
+// can't be in the future (a misread year/day swap is a common OCR failure
+// mode and produces exactly that), and anything more than a few years old
+// is far more likely a misread than a genuinely aged case reaching this
+// system now.
+function plausibleEventDate(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.valueOf())) return false;
+  const now = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+  const threeYearsMs = 3 * 365 * oneDayMs;
+  return date.getTime() <= now + oneDayMs && date.getTime() >= now - threeYearsMs;
+}
+
 // withTime also looks for a "godz. HH:MM" nearby and folds it into the
 // returned value as a full ISO datetime — needed so matchVehicleCustomer can
 // tell apart two handovers of the same vehicle on the same calendar day.
@@ -150,7 +165,15 @@ export function extractMandateFields(rawText: string): ExtractedFields {
           : plausiblePlate(registrationNumber)
             ? 0.68
             : 0.3,
-      eventAt: eventAtContext?.includes("T") ? 0.92 : eventAtContext ? 0.86 : eventAt ? 0.4 : 0,
+      eventAt: !eventAt
+        ? 0
+        : !plausibleEventDate(eventAt)
+          ? 0.25
+          : eventAtContext?.includes("T")
+            ? 0.92
+            : eventAtContext
+              ? 0.86
+              : 0.4,
       letterDate: letterDate ? 0.72 : 0,
       caseNumber: caseNumber ? 0.7 : 0,
       sender: sender ? 0.76 : 0,
