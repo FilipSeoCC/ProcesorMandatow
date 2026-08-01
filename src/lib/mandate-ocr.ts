@@ -44,6 +44,16 @@ function isoDate(value: string) {
   return Number.isNaN(date.valueOf()) ? null : date.toISOString().slice(0, 10);
 }
 
+// Deliberately loose: letter first, 4-8 chars total, letters/digits only.
+// Polish plates always start with a region-code letter and classic ones are
+// 7 characters, but exact region-code lists and individual/vanity plates
+// vary enough that hardcoding them would risk rejecting real plates — this
+// is a plausibility signal for OCR confidence, not a hard validity check.
+function plausiblePlate(candidate: string) {
+  const normalized = candidate.replace(/[ -]/g, "").toUpperCase();
+  return /^[A-Z][A-Z0-9]{3,7}$/.test(normalized);
+}
+
 // withTime also looks for a "godz. HH:MM" nearby and folds it into the
 // returned value as a full ISO datetime — needed so matchVehicleCustomer can
 // tell apart two handovers of the same vehicle on the same calendar day.
@@ -82,12 +92,19 @@ export function extractMandateFields(rawText: string): ExtractedFields {
   // positive (e.g. the regex latching onto a nearby word), so fall through.
   const plateContext =
     plateContextMatch && /\d/.test(plateContextMatch[1]) ? plateContextMatch : null;
+  const plateCandidates =
+    text.match(/\b[A-Z]{1,6}[ -]?[A-Z0-9]{2,6}\b/g) ?? [];
+  const isCandidate = (candidate: string) =>
+    /\d/.test(candidate) && !/^nr\b/i.test(candidate);
+  // Prefer a candidate that actually looks like a Polish plate (letter first,
+  // 4-8 chars total, no deliberately narrow rules about which region-code
+  // letters are valid — vanity/individual plates and rarer combinations
+  // legitimately break those) over just the first digit-containing token,
+  // which is what let a car model like "BMW E36" win before this existed.
   const plateFallback =
-    text
-      .match(/\b[A-Z]{1,6}[ -]?[A-Z0-9]{2,6}\b/g)
-      ?.find(
-        (candidate) => /\d/.test(candidate) && !/^nr\b/i.test(candidate),
-      ) ?? null;
+    plateCandidates.find(
+      (candidate) => isCandidate(candidate) && plausiblePlate(candidate),
+    ) ?? plateCandidates.find(isCandidate) ?? null;
   const registrationNumber =
     (plateContext?.[1] || plateFallback)?.replace(/[ -]/g, "").toUpperCase() ??
     null;
@@ -126,7 +143,13 @@ export function extractMandateFields(rawText: string): ExtractedFields {
     caseNumber,
     sender,
     confidence: {
-      registrationNumber: plateContext ? 0.94 : registrationNumber ? 0.68 : 0,
+      registrationNumber: !registrationNumber
+        ? 0
+        : plateContext
+          ? (plausiblePlate(registrationNumber) ? 0.94 : 0.6)
+          : plausiblePlate(registrationNumber)
+            ? 0.68
+            : 0.3,
       eventAt: eventAtContext?.includes("T") ? 0.92 : eventAtContext ? 0.86 : eventAt ? 0.4 : 0,
       letterDate: letterDate ? 0.72 : 0,
       caseNumber: caseNumber ? 0.7 : 0,
