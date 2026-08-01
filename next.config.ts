@@ -16,10 +16,6 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
           {
-            key: "Content-Security-Policy",
-            value: "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; img-src 'self' blob: data: https://*.supabase.co; connect-src 'self' https://*.supabase.co; style-src 'self' 'unsafe-inline'; script-src 'self'; upgrade-insecure-requests",
-          },
-          {
             key: "Permissions-Policy",
             value: "camera=(self), microphone=(), geolocation=(), payment=(), usb=()",
           },

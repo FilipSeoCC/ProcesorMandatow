@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { connection } from "next/server";
 import { Inter } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
@@ -22,7 +23,10 @@ export const viewport: Viewport = {
   themeColor: "#172033",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  // CSP nonces are generated per request, so the HTML shell must be rendered dynamically.
+  await connection();
+
   return (
     <html lang="pl" className={inter.variable}>
       <body>
