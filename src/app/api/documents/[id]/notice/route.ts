@@ -8,11 +8,9 @@ import { writeAuditEvent } from "@/lib/audit";
 export const runtime = "nodejs";
 const notoSans = path.join(
   process.cwd(),
-  "node_modules",
-  "@fontsource",
-  "noto-sans",
-  "files",
-  "noto-sans-latin-ext-400-normal.woff",
+  "src",
+  "assets",
+  "NotoSans-Regular.ttf",
 );
 
 function buildPdf(values: Record<string, string>) {

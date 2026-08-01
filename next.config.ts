@@ -4,8 +4,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   outputFileTracingIncludes: {
     "/api/documents/\\[id\\]/notice": [
-      "./node_modules/@fontsource/noto-sans/files/noto-sans-latin-ext-400-normal.woff",
-      "./node_modules/pdfkit/js/data/**/*",
+      "./src/assets/NotoSans-Regular.ttf",
     ],
   },
   async headers() {
