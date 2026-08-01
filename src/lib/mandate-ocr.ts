@@ -27,7 +27,11 @@ function documentAiConfig() {
 // between two word characters (digit and letter), silently dropping the date.
 const datePattern =
   /(?<!\d)(?:\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})(?!\d)/g;
-const timePattern = /\bgodz(?:in[aei]e?)?\.?\s*[:]?\s*(\d{1,2})[:.](\d{2})\b/i;
+// Up to 30 chars between the label and the digits — inline phrasing like
+// "o godz. 14:32" needs almost none, but tabular layouts put a whole extra
+// label word before the value ("Godzina zdarzenia" \n "14:32"), which the
+// old tight "godz. HH:MM" pattern couldn't reach at all.
+const timePattern = /\bgodz(?:in[aei]e?)?\b[\s\S]{0,30}?(\d{1,2})[:.](\d{2})\b/i;
 
 function isoDate(value: string) {
   const ymd = value.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/);
