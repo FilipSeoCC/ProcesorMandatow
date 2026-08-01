@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerEnv } from "@/lib/supabase-env";
 import { verifyMember } from "@/lib/supabase-auth";
+import { writeAuditEvent } from "@/lib/audit";
 
 type AuthSession = {
   access_token: string;
@@ -99,9 +100,9 @@ export async function PATCH(request: Request) {
     newPassword?: string;
   } | null;
   const newPassword = body?.newPassword ?? "";
-  if (newPassword.length < 8)
+  if (newPassword.length < 12)
     return NextResponse.json(
-      { error: "Nowe hasło musi mieć minimum 8 znaków." },
+      { error: "Nowe hasło musi mieć minimum 12 znaków." },
       { status: 422 },
     );
   const { url, publishableKey } = getSupabaseServerEnv();
@@ -127,6 +128,13 @@ export async function PATCH(request: Request) {
       { status: 400 },
     );
   }
+  await writeAuditEvent({
+    organizationId: member.organizationId,
+    userId: member.userId,
+    action: "password_changed",
+    entityType: "user",
+    entityId: member.userId,
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -142,9 +150,11 @@ export async function POST(request: Request) {
   } | null;
   const email = body?.email?.trim().toLowerCase() ?? "";
   const password = body?.password ?? "";
-  if (!/^\S+@\S+\.\S+$/.test(email) || password.length < 8)
+  const signingUp = body?.action === "sign-up";
+  const minimumPasswordLength = signingUp ? 12 : 8;
+  if (!/^\S+@\S+\.\S+$/.test(email) || password.length < minimumPasswordLength)
     return NextResponse.json(
-      { error: "Podaj poprawny e-mail i hasło mające minimum 8 znaków." },
+      { error: `Podaj poprawny e-mail i hasło mające minimum ${minimumPasswordLength} znaków.` },
       { status: 422 },
     );
   const { url, publishableKey } = getSupabaseServerEnv();
@@ -154,7 +164,6 @@ export async function POST(request: Request) {
       { status: 503 },
     );
 
-  const signingUp = body?.action === "sign-up";
   const firstName = body?.firstName?.trim() ?? "";
   const lastName = body?.lastName?.trim() ?? "";
   const phone = body?.phone?.trim() ?? "";

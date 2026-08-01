@@ -77,6 +77,9 @@ alter table public.mandate_documents add column if not exists sender text;
 alter table public.mandate_documents add column if not exists extraction_confidence jsonb not null default '{}'::jsonb;
 alter table public.mandate_documents add column if not exists ocr_error text not null default '';
 alter table public.mandate_documents add column if not exists processed_at timestamptz;
+alter table public.mandate_documents add column if not exists ocr_attempt_count integer not null default 0;
+alter table public.mandate_documents add column if not exists ocr_last_attempt_at timestamptz;
+alter table public.mandate_documents add column if not exists ocr_next_retry_at timestamptz;
 alter table public.mandate_documents add column if not exists responsible_name text not null default '';
 alter table public.mandate_documents add column if not exists responsible_tax_id text not null default '';
 alter table public.mandate_documents add column if not exists responsible_email text not null default '';
@@ -120,6 +123,28 @@ begin
 end $$;
 revoke all on function public.bootstrap_organization(text) from public;
 grant execute on function public.bootstrap_organization(text) to authenticated;
+
+create or replace function public.claim_ocr_job() returns table(id uuid, organization_id uuid) language plpgsql security definer set search_path=public as $$
+begin
+  return query
+  with candidate as (
+    select d.id from public.mandate_documents d
+    where (
+      d.status = 'uploaded'
+      or (d.status = 'ocr_failed' and d.ocr_attempt_count < 3 and coalesce(d.ocr_next_retry_at, now()) <= now())
+      or (d.status = 'processing' and coalesce(d.ocr_last_attempt_at, d.created_at) < now() - interval '15 minutes')
+    )
+    order by d.created_at asc
+    for update skip locked limit 1
+  )
+  update public.mandate_documents d set
+    status = 'processing', ocr_attempt_count = d.ocr_attempt_count + 1,
+    ocr_last_attempt_at = now(), ocr_next_retry_at = now() + interval '5 minutes'
+  from candidate c where d.id = c.id
+  returning d.id, d.organization_id;
+end $$;
+revoke all on function public.claim_ocr_job() from public;
+grant execute on function public.claim_ocr_job() to service_role;
 
 alter table public.organizations enable row level security; alter table public.organization_members enable row level security;
 alter table public.customers enable row level security; alter table public.vehicles enable row level security;

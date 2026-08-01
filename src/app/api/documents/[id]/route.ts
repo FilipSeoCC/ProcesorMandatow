@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+import { writeAuditEvent } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -62,6 +63,13 @@ export async function PATCH(
       { error: "Nie udało się zapisać sprawy." },
       { status: 502 },
     );
+  await writeAuditEvent({
+    organizationId: member.organizationId,
+    userId: member.userId,
+    action: "mandate_document_confirmed",
+    entityType: "mandate_document",
+    entityId: id,
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -104,5 +112,13 @@ export async function DELETE(
       { error: "Nie udało się usunąć sprawy." },
       { status: 502 },
     );
+  await writeAuditEvent({
+    organizationId: member.organizationId,
+    userId: member.userId,
+    action: "mandate_document_deleted",
+    entityType: "mandate_document",
+    entityId: id,
+    details: { pageCount: pages.length },
+  });
   return NextResponse.json({ ok: true });
 }

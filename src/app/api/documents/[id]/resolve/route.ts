@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+import { writeAuditEvent } from "@/lib/audit";
 
 export const runtime = "nodejs";
 
@@ -54,5 +55,12 @@ export async function POST(
       { error: "Nie udało się oznaczyć sprawy jako zrealizowanej." },
       { status: 502 },
     );
+  await writeAuditEvent({
+    organizationId: member.organizationId,
+    userId: member.userId,
+    action: "mandate_document_resolved",
+    entityType: "mandate_document",
+    entityId: id,
+  });
   return NextResponse.json({ ok: true });
 }

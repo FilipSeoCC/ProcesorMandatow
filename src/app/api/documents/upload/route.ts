@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 import { processMandateOcr } from "@/lib/mandate-ocr";
+import { writeAuditEvent } from "@/lib/audit";
 import { after } from "next/server";
 
 export const runtime = "nodejs";
@@ -141,6 +142,14 @@ export async function POST(request: Request) {
       })),
     );
     after(() => processMandateOcr(documentId, ocrFiles, member.organizationId));
+    await writeAuditEvent({
+      organizationId: member.organizationId,
+      userId: member.userId,
+      action: "mandate_document_uploaded",
+      entityType: "mandate_document",
+      entityId: documentId,
+      details: { pageCount: files.length },
+    });
     return NextResponse.json({
       mode: "supabase",
       documentId,
