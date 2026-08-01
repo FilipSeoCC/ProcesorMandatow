@@ -20,7 +20,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 10_000);
+    // Some privacy extensions terminate fetches without resolving or rejecting
+    // the promise. A state fallback keeps the gate from becoming a permanent
+    // loading screen in that case.
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      setStatus("guest");
+    }, 10_000);
     fetch("/api/auth", { cache: "no-store", signal: controller.signal })
       .then((response) => setStatus(response.ok ? "ready" : "guest"))
       .catch(() => setStatus("guest"))
