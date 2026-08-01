@@ -87,6 +87,10 @@ alter table public.mandate_documents add column if not exists confirmed_at times
 alter table public.mandate_documents add column if not exists confirmed_by uuid references auth.users(id) on delete set null;
 alter table public.mandate_documents add column if not exists resolved_at timestamptz;
 alter table public.mandate_documents add column if not exists resolved_by uuid references auth.users(id) on delete set null;
+alter table public.mandate_documents add column if not exists review_package_sent_at timestamptz;
+alter table public.mandate_documents add column if not exists review_package_sent_by uuid references auth.users(id) on delete set null;
+alter table public.mandate_documents add column if not exists review_package_email text not null default '';
+alter table public.mandate_documents add column if not exists review_package_resend_id text not null default '';
 create table if not exists public.mandate_document_pages (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   document_id uuid not null, page_number integer not null check(page_number between 1 and 10), storage_path text not null unique,
