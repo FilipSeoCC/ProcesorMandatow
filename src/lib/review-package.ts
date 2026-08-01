@@ -8,6 +8,12 @@ type MandateMailData = {
   sender: string | null;
   responsible_name: string;
   responsible_email: string;
+  vehicle_brand?: string | null;
+  vehicle_model?: string | null;
+  agreement_number?: string | null;
+  office_name?: string | null;
+  office_email?: string | null;
+  office_phone?: string | null;
 };
 
 const escapeHtml = (value: string) =>

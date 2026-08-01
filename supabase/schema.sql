@@ -8,6 +8,9 @@ create table if not exists public.organizations (
   owner_id uuid not null references auth.users(id) on delete restrict,
   created_at timestamptz not null default now()
 );
+alter table public.organizations add column if not exists contact_email text not null default '';
+alter table public.organizations add column if not exists contact_phone text not null default '';
+alter table public.organizations add column if not exists postal_address text not null default '';
 create table if not exists public.organization_members (
   organization_id uuid not null references public.organizations(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
