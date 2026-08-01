@@ -22,8 +22,12 @@ function documentAiConfig() {
   return { audience, processorId, location, projectId };
 }
 
+// (?!\d) instead of a trailing \b — Polish letters ("r." for "roku") often
+// follow the year with no space, e.g. "15.07.2026r.", and \b never matches
+// between two word characters (digit and letter), silently dropping the date.
 const datePattern =
-  /\b(?:\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})\b/g;
+  /(?<!\d)(?:\d{4}[.\-/]\d{1,2}[.\-/]\d{1,2}|\d{1,2}[.\-/]\d{1,2}[.\-/]\d{4})(?!\d)/g;
+const timePattern = /\bgodz(?:in[aei]e?)?\.?\s*[:]?\s*(\d{1,2})[:.](\d{2})\b/i;
 
 function isoDate(value: string) {
   const ymd = value.match(/^(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})$/);
@@ -40,13 +44,27 @@ function isoDate(value: string) {
   return Number.isNaN(date.valueOf()) ? null : date.toISOString().slice(0, 10);
 }
 
-function dateNear(text: string, labels: RegExp) {
+// withTime also looks for a "godz. HH:MM" nearby and folds it into the
+// returned value as a full ISO datetime — needed so matchVehicleCustomer can
+// tell apart two handovers of the same vehicle on the same calendar day.
+function dateNear(text: string, labels: RegExp, withTime = false) {
   for (const match of text.matchAll(datePattern)) {
     const context = text.slice(
       Math.max(0, (match.index ?? 0) - 100),
       (match.index ?? 0) + match[0].length + 40,
     );
-    if (labels.test(context)) return isoDate(match[0]);
+    if (!labels.test(context)) continue;
+    const date = isoDate(match[0]);
+    if (!date) continue;
+    if (withTime) {
+      const time = context.match(timePattern);
+      const hour = time ? Number(time[1]) : null;
+      const minute = time ? Number(time[2]) : null;
+      if (hour !== null && minute !== null && hour <= 23 && minute <= 59) {
+        return `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`;
+      }
+    }
+    return date;
   }
   return null;
 }
@@ -72,7 +90,7 @@ export function extractMandateFields(rawText: string): ExtractedFields {
   const allDates = [...text.matchAll(datePattern)]
     .map((match) => isoDate(match[0]))
     .filter(Boolean) as string[];
-  const eventAtContext = dateNear(text, /zdarzen|naruszen|wykroczen|ujawnion/i);
+  const eventAtContext = dateNear(text, /zdarzen|naruszen|wykroczen|ujawnion/i, true);
   const eventAt = eventAtContext ?? allDates[0] ?? null;
   const letterDate =
     dateNear(
@@ -105,7 +123,7 @@ export function extractMandateFields(rawText: string): ExtractedFields {
     sender,
     confidence: {
       registrationNumber: plateContext ? 0.94 : registrationNumber ? 0.68 : 0,
-      eventAt: eventAtContext ? 0.86 : eventAt ? 0.4 : 0,
+      eventAt: eventAtContext?.includes("T") ? 0.92 : eventAtContext ? 0.86 : eventAt ? 0.4 : 0,
       letterDate: letterDate ? 0.72 : 0,
       caseNumber: caseNumber ? 0.7 : 0,
       sender: sender ? 0.76 : 0,

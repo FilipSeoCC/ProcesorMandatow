@@ -71,6 +71,9 @@ create table if not exists public.mandate_documents (
 alter table public.mandate_documents add column if not exists ocr_text text not null default '';
 alter table public.mandate_documents add column if not exists registration_number text;
 alter table public.mandate_documents add column if not exists event_at date;
+-- event_at needs hour-of-day precision so matchVehicleCustomer can tell apart
+-- two handovers of the same vehicle on the same calendar day.
+alter table public.mandate_documents alter column event_at type timestamptz using event_at::timestamptz;
 alter table public.mandate_documents add column if not exists letter_date date;
 alter table public.mandate_documents add column if not exists case_number text;
 alter table public.mandate_documents add column if not exists sender text;

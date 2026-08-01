@@ -21,7 +21,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Nieprawidłowe dane." }, { status: 422 });
 
   const registrationNumber = text(body.registrationNumber, 15).toUpperCase();
-  const eventAt = text(body.eventAt, 10);
+  const eventAt = text(body.eventAt, 30);
   const caseNumber = text(body.caseNumber, 80);
   const sender = text(body.sender, 200);
   const responsibleName = text(body.responsibleName, 200);
