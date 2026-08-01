@@ -17,7 +17,7 @@ type MandateMailData = {
 };
 
 const escapeHtml = (value: string) =>
-  value.replace(/&/g, (character) =>
+  value.replace(/[&<>"']/g, (character) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]!,
   );
 
