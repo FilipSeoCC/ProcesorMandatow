@@ -71,8 +71,12 @@ function dateNear(text: string, labels: RegExp, withTime = false) {
 
 export function extractMandateFields(rawText: string): ExtractedFields {
   const text = rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ");
+  // "rej\.?" also matches the common abbreviation "nr rej." — documents
+  // rarely spell out "rejestracyjny" in full, and without this the label
+  // never matches, so the fallback below picks up the first capitalized
+  // token with a digit — including car model/chassis codes like "BMW E36".
   const plateContextMatch = text.match(
-    /(?:nr|numer)[\s\S]{0,35}rejestracyj(?:ny|nego|nym)[\s\S]{0,60}?\b([A-Z]{1,6}[ -]?[A-Z0-9]{2,6})\b/i,
+    /(?:nr|numer)[\s\S]{0,35}rej(?:\.|estracyj(?:ny|nego|nym))[\s\S]{0,60}?\b([A-Z]{1,6}[ -]?[A-Z0-9]{2,6})\b/i,
   );
   // A real plate always has a digit — a label match without one is a false
   // positive (e.g. the regex latching onto a nearby word), so fall through.
