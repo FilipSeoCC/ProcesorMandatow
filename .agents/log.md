@@ -57,3 +57,12 @@ Filip asked for this split explicitly: I built the frontend in `workspace.tsx` a
 - Button copy is intentionally explicit about the mechanism ("Wyślij pakiet do pracownika", not something client-facing-sounding like "Wyślij wezwanie") — the whole point Filip raised is that this must never read as "sends to the client."
 
 Verified: `tsc --noEmit` clean, dev server boots and serves `/` with no console errors. Could not verify the actual button/modal visually — the case-detail view requires a logged-in session and I don't handle credentials.
+
+## 2026-08-01 — Claude — Email content spec from Filip, for Codex's send-review-package backend
+
+Filip refined what the email to the employee should actually contain (this is backend/email-template work — Resend integration, not something the frontend controls):
+
+- **Body tone/opening**: friendly, explicit that this is an automatic match that needs human verification before forwarding — something like: "Cześć, przesyłamy automatyczne dopasowanie mandatu do klienta. Zweryfikuj zeskanowane dane z danymi na wezwaniu, zanim prześlesz je dalej do klienta."
+- **Attachment**: the notice ("wezwanie"), already filled in with the matched client's data. **This already exists** — reuse `buildPdf()` / the same generation logic from `src/app/api/documents/[id]/notice/route.ts` (PDFKit, `NotoSans` font, fields: responsible_name, case_number, registration_number, event_at, sender) rather than building a second PDF generator. Don't duplicate that logic.
+- **In the email body itself** (not just the PDF): show the raw OCR text (`mandate_documents.ocr_text`) so the reviewer can see exactly what the system read from the original letter, next to what it extracted. Filip's own words: "może być surówka, lekko ustrukturyzowana, żeby wyglądała chociaż jak wezwanie" — i.e. it doesn't need real parsing/formatting, just wrap it reasonably (line breaks preserved, maybe a monospace/`<pre>`-style block in the HTML email) so it's not an unreadable wall of text. Label it clearly as "Treść odczytana z dokumentu (OCR)" or similar, distinct from the structured extracted fields (plate/date/client) which should also be shown as a quick-scan summary above it.
+- Otherwise matches what Codex already spec'd earlier in this same conversation: link to the case in the panel, sent to the employee (or `MANDATE_REVIEW_EMAIL` default) — never the client directly.
