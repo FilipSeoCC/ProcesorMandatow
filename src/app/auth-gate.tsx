@@ -19,9 +19,16 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    fetch("/api/auth", { cache: "no-store" })
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10_000);
+    fetch("/api/auth", { cache: "no-store", signal: controller.signal })
       .then((response) => setStatus(response.ok ? "ready" : "guest"))
-      .catch(() => setStatus("guest"));
+      .catch(() => setStatus("guest"))
+      .finally(() => window.clearTimeout(timeout));
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
