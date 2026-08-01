@@ -23,6 +23,8 @@ export async function verifyMember(
   const authorization =
     request.headers.get("authorization") ??
     (cookieToken ? `Bearer ${decodeURIComponent(cookieToken)}` : null);
+  const origin = request.headers.get("origin");
+  if (cookieToken && origin && origin !== new URL(request.url).origin) return null;
   const accessToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!supabaseUrl || !anonKey || !accessToken) return null;
 

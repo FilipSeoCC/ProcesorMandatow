@@ -168,6 +168,11 @@ export async function POST(request: Request) {
   const lastName = body?.lastName?.trim() ?? "";
   const phone = body?.phone?.trim() ?? "";
   if (signingUp) {
+    if (process.env.ALLOW_PUBLIC_SIGNUP !== "true")
+      return NextResponse.json(
+        { error: "Rejestracja jest dostępna wyłącznie na zaproszenie." },
+        { status: 403 },
+      );
     if (!firstName || !lastName || !phone)
       return NextResponse.json(
         { error: "Podaj imię, nazwisko i numer telefonu." },

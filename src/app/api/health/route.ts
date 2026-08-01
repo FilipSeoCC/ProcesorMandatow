@@ -27,7 +27,7 @@ export async function GET() {
   }
 
   return NextResponse.json(
-    { status: checks.supabase ? "ok" : "degraded", checks },
+    { status: checks.supabase ? "ok" : "degraded" },
     { status: checks.supabase ? 200 : 503, headers: { "Cache-Control": "no-store" } },
   );
 }

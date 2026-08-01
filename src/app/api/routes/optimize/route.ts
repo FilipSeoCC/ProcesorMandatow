@@ -51,7 +51,10 @@ export async function POST(request: Request) {
 
   const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
-  if (!apiKey || !projectId) return NextResponse.json(demo(body));
+  if (!apiKey || !projectId) {
+    if (process.env.ROUTE_OPTIMIZATION_DEMO_MODE === "true") return NextResponse.json(demo(body));
+    return NextResponse.json({ error: "Planowanie tras nie jest skonfigurowane." }, { status: 503 });
+  }
   const member = await verifyMember(request, ["admin", "dispatcher"]);
   if (!member) return NextResponse.json({ error: "Zaloguj się jako administrator lub dyspozytor, aby użyć Google." }, { status: 401 });
 
