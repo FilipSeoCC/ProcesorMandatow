@@ -90,6 +90,10 @@ alter table public.mandate_documents add column if not exists confirmed_at times
 alter table public.mandate_documents add column if not exists confirmed_by uuid references auth.users(id) on delete set null;
 alter table public.mandate_documents add column if not exists resolved_at timestamptz;
 alter table public.mandate_documents add column if not exists resolved_by uuid references auth.users(id) on delete set null;
+alter table public.mandate_documents add column if not exists review_package_sent_at timestamptz;
+alter table public.mandate_documents add column if not exists review_package_sent_by uuid references auth.users(id) on delete set null;
+alter table public.mandate_documents add column if not exists review_package_email text not null default '';
+alter table public.mandate_documents add column if not exists review_package_resend_id text not null default '';
 create table if not exists public.mandate_document_pages (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   document_id uuid not null, page_number integer not null check(page_number between 1 and 10), storage_path text not null unique,
@@ -111,15 +115,11 @@ declare created_id uuid; existing_id uuid;
 begin
   if auth.uid() is null then raise exception 'Not authenticated'; end if;
   if exists(select 1 from public.organization_members where user_id=auth.uid()) then raise exception 'User already belongs to an organization'; end if;
-  -- Single-tenant deployment: once an organization exists, every new signup
-  -- joins it with full working access instead of bootstrapping its own
-  -- isolated org. 'office' can process documents/fleet/routes but not manage
-  -- org members, unlike 'admin'.
+  -- A second account may never join an existing fleet through a public RPC.
+  -- It must be added by the invitation flow, otherwise any person who signs
+  -- up with the public Supabase endpoint could gain office access.
   select id into existing_id from public.organizations order by created_at asc limit 1;
-  if existing_id is not null then
-    insert into public.organization_members(organization_id,user_id,role) values(existing_id,auth.uid(),'office');
-    return existing_id;
-  end if;
+  if existing_id is not null then raise exception 'Invitation required'; end if;
   insert into public.organizations(name,owner_id) values(coalesce(nullif(trim(company_name),''),'Moja firma'),auth.uid()) returning id into created_id;
   insert into public.organization_members(organization_id,user_id,role) values(created_id,auth.uid(),'admin');
   return created_id;

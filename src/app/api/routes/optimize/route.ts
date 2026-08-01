@@ -52,7 +52,10 @@ export async function POST(request: Request) {
 
   const audience = process.env.GOOGLE_WIF_AUDIENCE;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
-  if (!audience || !projectId) return NextResponse.json(demo(body));
+  if (!audience || !projectId) {
+    if (process.env.ROUTE_OPTIMIZATION_DEMO_MODE === "true") return NextResponse.json(demo(body));
+    return NextResponse.json({ error: "Planowanie tras nie jest skonfigurowane." }, { status: 503 });
+  }
   const member = await verifyMember(request, ["admin", "dispatcher"]);
   if (!member) return NextResponse.json({ error: "Zaloguj się jako administrator lub dyspozytor, aby użyć Google." }, { status: 401 });
 
