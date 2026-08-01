@@ -18,6 +18,20 @@ const allowedExtensions = new Set([
   "heic",
   "heif",
 ]);
+const extensionFromMimeType: Record<string, string> = {
+  "application/pdf": "pdf",
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/tiff": "tiff",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
+
+function supportedExtension(file: File) {
+  const namedExtension = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (allowedExtensions.has(namedExtension)) return namedExtension;
+  return extensionFromMimeType[file.type.toLowerCase()] ?? "";
+}
 
 export async function POST(request: Request) {
   const form = await request.formData().catch(() => null);
@@ -31,9 +45,8 @@ export async function POST(request: Request) {
       { status: 422 },
     );
   const invalid = files.find((file) => {
-    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
     return (
-      !allowedExtensions.has(extension) ||
+      !supportedExtension(file) ||
       file.size <= 0 ||
       file.size > 15 * 1024 * 1024
     );
@@ -69,7 +82,7 @@ export async function POST(request: Request) {
   const storedPaths: string[] = [];
   try {
     for (const [index, file] of files.entries()) {
-      const extension = file.name.split(".").pop()!.toLowerCase();
+      const extension = supportedExtension(file);
       const path = `${member.organizationId}/${documentId}/${String(index + 1).padStart(2, "0")}.${extension}`;
       const upload = await fetch(
         `${supabaseUrl}/storage/v1/object/mandate-documents/${path}`,
