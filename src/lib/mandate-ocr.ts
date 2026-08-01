@@ -263,19 +263,29 @@ export async function processMandateOcr(
     if (ready) {
       const { url, secretKey } = getSupabaseServerEnv();
       if (url && secretKey) {
-        const result = await matchVehicleCustomer(
-          url,
-          secretKey,
-          organizationId,
-          fields.registrationNumber,
-          fields.eventAt,
-        );
-        if (result.matched)
-          match = {
-            name: result.responsibleName,
-            taxId: result.responsibleTaxId,
-            email: result.responsibleEmail,
-          };
+        // Matching is a best-effort enrichment on top of a successful OCR
+        // read. It talks to Supabase over the network, so it can fail for
+        // reasons that say nothing about the OCR result — without this local
+        // catch the failure would reach the outer handler, which marks the
+        // document "ocr_failed" and throws away rawText/fields we already
+        // extracted, forcing a pointless rescan of a perfectly readable doc.
+        try {
+          const result = await matchVehicleCustomer(
+            url,
+            secretKey,
+            organizationId,
+            fields.registrationNumber,
+            fields.eventAt,
+          );
+          if (result.matched)
+            match = {
+              name: result.responsibleName,
+              taxId: result.responsibleTaxId,
+              email: result.responsibleEmail,
+            };
+        } catch (error) {
+          console.error("Vehicle match failed after OCR", documentId, error);
+        }
       }
     }
 

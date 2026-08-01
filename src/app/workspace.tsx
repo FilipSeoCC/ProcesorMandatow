@@ -358,7 +358,14 @@ export default function MandatyWorkspace() {
   const selected =
     caseItems.find((item) => item.id === selectedId) ?? caseItems[0];
 
+  // Keyed on the underlying values, not just selected.id: the OCR poll can
+  // fill in a match for the case that is already open, and with an id-only
+  // dependency this effect never re-ran, so the panel kept showing "Brak
+  // dopasowania" until the user navigated away and back. Polling returns
+  // identical values while nothing changes, so this does not fight the user's
+  // typing — it only re-runs when the server value actually moved.
   useEffect(() => {
+    if (!selected) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the edit form when the selected case changes, not a derived-render value
     setDraft({
       plate: selected.plate === "OCR…" ? "" : selected.plate,
@@ -381,7 +388,17 @@ export default function MandatyWorkspace() {
     setAuthorityAddress(selected.authorityAddress || "");
     setCaseMenuOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected.id]);
+  }, [
+    selected?.id,
+    selected?.plate,
+    selected?.eventAt,
+    selected?.sender,
+    selected?.responsibleName,
+    selected?.responsibleTaxId,
+    selected?.responsibleEmail,
+    selected?.authorityName,
+    selected?.authorityAddress,
+  ]);
 
   const filtered = useMemo(
     () =>
@@ -493,7 +510,15 @@ export default function MandatyWorkspace() {
         review_package_sent_at?: string | null;
       }>;
     };
-    if (!result.documents?.length) return null;
+    // Zero documents is a real state (every case deleted), not a failure to
+    // ignore — returning early without clearing would leave the just-deleted
+    // cases on screen, still selectable, pointing at ids the server no longer
+    // has. The detail panel is conditionally rendered for exactly this case.
+    if (!result.documents?.length) {
+      setCaseItems([]);
+      setSelectedId("");
+      return [];
+    }
     const mapped: CaseItem[] = result.documents.map((document) => ({
       id: document.case_number || document.id.slice(0, 13).toUpperCase(),
       documentId: document.id,
@@ -1695,6 +1720,7 @@ export default function MandatyWorkspace() {
                 )}
               </div>
 
+              {selected && (
               <div
                 className={`${styles.detailPanel} ${mobileDetailOpen ? styles.detailPanelOpen : ""}`}
                 key={`${selected.id}|${selected.plate}|${selected.eventAt}|${selected.sender}|${selected.ocrStatus}|${selected.customer}`}
@@ -1995,6 +2021,7 @@ export default function MandatyWorkspace() {
                   </div>
                 </div>
               </div>
+              )}
             </section>
           </>
         )}
