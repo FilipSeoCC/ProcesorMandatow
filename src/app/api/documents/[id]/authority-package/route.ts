@@ -14,6 +14,15 @@ export const maxDuration = 120;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_SOURCE_BYTES = 28 * 1024 * 1024;
 
+function authorityPackageErrorMessage(error: unknown) {
+  if (
+    error instanceof Error &&
+    error.message.startsWith("AUTHORITY_CONTEXT_")
+  )
+    return "Nie udało się pobrać podstawowych danych sprawy z Supabase. Sprawdź, czy wdrożono aktualny schemat bazy.";
+  return "Nie udało się przygotować pakietu do urzędu.";
+}
+
 type PageRow = {
   storage_path: string;
   original_name: string;
@@ -212,7 +221,7 @@ export async function POST(
   } catch (error) {
     console.error("Authority review package failed", error);
     return NextResponse.json(
-      { error: "Nie udało się przygotować pakietu do urzędu." },
+      { error: authorityPackageErrorMessage(error) },
       { status: 502 },
     );
   }

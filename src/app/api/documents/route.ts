@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+import { detectAuthorityFromOcr } from "@/lib/authority-detection";
 
 type DocumentRow = {
   id: string;
@@ -94,7 +95,20 @@ export async function GET(request: Request) {
               : `${url}/storage/v1${path}`;
         }
       }
-      return { ...document, previewUrl };
+      const authority = detectAuthorityFromOcr(
+        mayReadSensitiveData ? document.ocr_text : "",
+        document.sender,
+      );
+      return {
+        ...document,
+        sender: authority.name || null,
+        authority_name: authority.name || null,
+        authority_address:
+          mayReadSensitiveData && authority.address ? authority.address : null,
+        authority_confidence: authority.confidence,
+        authority_source: authority.source,
+        previewUrl,
+      };
     }),
   );
   return NextResponse.json({ documents: items });

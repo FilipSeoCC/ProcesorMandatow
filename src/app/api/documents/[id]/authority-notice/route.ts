@@ -11,6 +11,15 @@ export const maxDuration = 60;
 const cleanRecipientField = (value: unknown, maxLength: number) =>
   typeof value === "string" ? value.trim().slice(0, maxLength) : "";
 
+function authorityPdfErrorMessage(error: unknown) {
+  if (
+    error instanceof Error &&
+    error.message.startsWith("AUTHORITY_CONTEXT_")
+  )
+    return "Nie udało się pobrać podstawowych danych sprawy z Supabase. Sprawdź, czy wdrożono aktualny schemat bazy.";
+  return "Nie udało się przygotować pisma do urzędu.";
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -80,7 +89,7 @@ export async function POST(
   } catch (error) {
     console.error("Authority response PDF failed", error);
     return NextResponse.json(
-      { error: "Nie udało się przygotować pisma do urzędu." },
+      { error: authorityPdfErrorMessage(error) },
       { status: 502 },
     );
   }

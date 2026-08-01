@@ -2,6 +2,7 @@ import "server-only";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 import { matchVehicleCustomer } from "@/lib/vehicle-match";
 import { gcpWorkloadIdentityClient } from "@/lib/gcp-oidc";
+import { detectAuthorityFromOcr } from "@/lib/authority-detection";
 
 type OcrFile = { name: string; type: string; bytes: ArrayBuffer };
 type ExtractedFields = {
@@ -140,18 +141,10 @@ export function extractMandateFields(rawText: string): ExtractedFields {
     text.match(
       /(?:znak|sygnatura|numer|nr)\s*(?:sprawy|pisma)?\s*[:.#]?\s*([A-Z0-9][A-Z0-9/_\-.]{4,})/i,
     )?.[1] ?? null;
-  const senderLines = text
-    .split("\n")
-    .slice(0, 12)
-    .map((line) => line.trim());
-  const sender =
-    senderLines.find((line) =>
-      /straż miejska|inspektorat transportu|canard|policj|urząd/i.test(line),
-    ) ??
-    senderLines.find((line) =>
-      /sp\.?\s*z\.?\s*[o0]\.?\s*[o0]\.?|s\.a\.|spółka/i.test(line),
-    ) ??
-    null;
+  // Match explicit authority names only. The previous broad /urząd/i rule
+  // also accepted body text such as "urządzenie rejestrujące" as the sender.
+  const authority = detectAuthorityFromOcr(rawText);
+  const sender = authority.name || null;
   return {
     registrationNumber,
     eventAt,
@@ -177,7 +170,7 @@ export function extractMandateFields(rawText: string): ExtractedFields {
               : 0.4,
       letterDate: letterDate ? 0.72 : 0,
       caseNumber: caseNumber ? 0.7 : 0,
-      sender: sender ? 0.76 : 0,
+      sender: authority.confidence,
     },
   };
 }

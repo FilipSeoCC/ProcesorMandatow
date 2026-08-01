@@ -53,6 +53,10 @@ type CaseItem = {
   createdAt?: string;
   plate: string;
   sender: string;
+  authorityName?: string | null;
+  authorityAddress?: string | null;
+  authorityConfidence?: number;
+  authoritySource?: "ocr" | "stored" | "none";
   eventAt: string;
   letterDate?: string | null;
   receivedAt: string;
@@ -113,6 +117,29 @@ async function prepareCameraUpload(file: File) {
 function plausibleName(value: string) {
   const trimmed = value.trim();
   return trimmed.length >= 2 && /^[\p{L} .'-]+$/u.test(trimmed) && /\p{L}/u.test(trimmed);
+}
+
+function plausibleAuthorityLabel(value: string) {
+  const trimmed = value.trim();
+  return (
+    trimmed.length >= 4 &&
+    trimmed.length <= 150 &&
+    !/urządzeni[ea] rejestrując|w związku z|ujawnieniem naruszenia|niniejszym/i.test(
+      trimmed,
+    ) &&
+    /canard|centrum automatycznego nadzoru|inspektorat transportu drogowego|straż (?:miejska|gminna)|policj|urząd skarbow|urząd (?:miasta|gminy|miejski|marszałkowski)|zarząd dróg/i.test(
+      trimmed,
+    )
+  );
+}
+
+function formatCaseEventAt(value: string) {
+  const iso = value.match(
+    /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/,
+  );
+  if (!iso) return value;
+  const date = `${iso[3]}.${iso[2]}.${iso[1]}`;
+  return iso[4] && iso[5] ? `${date}, ${iso[4]}:${iso[5]}` : date;
 }
 
 function storedAccessToken() {
@@ -339,9 +366,10 @@ export default function MandatyWorkspace() {
     setAuthorityPackageOpen(false);
     setAuthorityPackageError(null);
     setAuthorityName(
-      selected.sender === "Nowy dokument z telefonu" ? "" : selected.sender,
+      selected.authorityName ||
+        (plausibleAuthorityLabel(selected.sender) ? selected.sender : ""),
     );
-    setAuthorityAddress("");
+    setAuthorityAddress(selected.authorityAddress || "");
     setCaseMenuOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected.id]);
@@ -442,6 +470,10 @@ export default function MandatyWorkspace() {
         letter_date: string | null;
         case_number: string | null;
         sender: string | null;
+        authority_name?: string | null;
+        authority_address?: string | null;
+        authority_confidence?: number;
+        authority_source?: "ocr" | "stored" | "none";
         previewUrl: string | null;
         ocr_text: string | null;
         responsible_name: string;
@@ -459,6 +491,10 @@ export default function MandatyWorkspace() {
       uploadedBy: document.uploaded_by,
       plate: document.registration_number || "OCR…",
       sender: document.sender || "Nowy dokument z telefonu",
+      authorityName: document.authority_name ?? null,
+      authorityAddress: document.authority_address ?? null,
+      authorityConfidence: document.authority_confidence ?? 0,
+      authoritySource: document.authority_source ?? "none",
       eventAt: document.event_at || "Oczekuje na OCR",
       letterDate: document.letter_date,
       receivedAt: new Date(document.created_at).toLocaleString("pl-PL", {
@@ -780,9 +816,11 @@ export default function MandatyWorkspace() {
   function openAuthorityPackage() {
     setAuthorityPackageError(null);
     setAuthorityName(
-      draft.sender.trim() ||
-        (selected.sender === "Nowy dokument z telefonu" ? "" : selected.sender),
+      selected.authorityName ||
+        (plausibleAuthorityLabel(draft.sender) ? draft.sender.trim() : "") ||
+        (plausibleAuthorityLabel(selected.sender) ? selected.sender : ""),
     );
+    setAuthorityAddress(selected.authorityAddress || "");
     setAuthorityPackageOpen(true);
   }
 
@@ -2107,11 +2145,35 @@ export default function MandatyWorkspace() {
               </span>
               <span>
                 <strong>Data zdarzenia</strong>
-                {selected.eventAt}
+                {formatCaseEventAt(selected.eventAt)}
               </span>
               <span>
                 <strong>Wskazany użytkownik</strong>
                 {draft.responsibleName || "Brak dopasowania"}
+              </span>
+            </div>
+            <div
+              className={`${styles.authorityDetection} ${
+                selected.authorityName
+                  ? styles.authorityDetectionSuccess
+                  : styles.authorityDetectionWarning
+              }`}
+              role="status"
+            >
+              {selected.authorityName ? (
+                <CheckCircle2 size={16} aria-hidden="true" />
+              ) : (
+                <CircleHelp size={16} aria-hidden="true" />
+              )}
+              <span>
+                <strong>
+                  {selected.authorityName
+                    ? "Organ rozpoznany ze skanu OCR"
+                    : "Nie rozpoznano organu w dokumencie"}
+                </strong>
+                {selected.authorityName
+                  ? "Sprawdź nazwę i adres z nagłówkiem pisma przed pobraniem PDF."
+                  : "Uzupełnij nazwę i pełny adres ręcznie — system nie podstawi przypadkowego zdania z treści pisma."}
               </span>
             </div>
             <div className={styles.authorityForm}>
