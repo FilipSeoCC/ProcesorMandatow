@@ -1,0 +1,6 @@
+{
+  "crons": [
+    { "path": "/api/internal/ocr/process", "schedule": "0 3 * * *" },
+    { "path": "/api/internal/documents/rematch", "schedule": "15 3 * * *" }
+  ]
+}

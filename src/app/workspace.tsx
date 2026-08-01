@@ -102,6 +102,15 @@ async function prepareCameraUpload(file: File) {
   }
 }
 
+// Loose plausibility check, same spirit as the OCR-side plate/date checks:
+// flags obvious garbage (digits, a single character, stray symbols) without
+// rejecting real names — Polish names carry diacritics, hyphenated
+// surnames, multiple given names, apostrophes, etc.
+function plausibleName(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length >= 2 && /^[\p{L} .'-]+$/u.test(trimmed) && /\p{L}/u.test(trimmed);
+}
+
 function storedAccessToken() {
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
@@ -1660,7 +1669,10 @@ export default function MandatyWorkspace() {
                             }))
                           }
                           wide
-                          warning={!draft.responsibleName}
+                          warning={
+                            !draft.responsibleName ||
+                            !plausibleName(draft.responsibleName)
+                          }
                         />
                         <Field
                           label="NIP / PESEL"

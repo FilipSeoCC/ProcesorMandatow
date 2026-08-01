@@ -3,7 +3,8 @@ import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 type AuditEvent = {
   organizationId: string;
-  userId: string;
+  // null for actions triggered by a cron/system job, not a logged-in user.
+  userId: string | null;
   action: string;
   entityType: string;
   entityId: string;
