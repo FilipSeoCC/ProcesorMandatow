@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
-import { processMandateOcr } from "@/lib/mandate-ocr";
+import {
+  markMandateOcrProcessing,
+  processMandateOcr,
+} from "@/lib/mandate-ocr";
 import { after } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 type PageRow = {
   storage_path: string;
@@ -74,6 +77,7 @@ export async function POST(
       { status: 502 },
     );
 
+  await markMandateOcrProcessing(documentId);
   after(() => processMandateOcr(documentId, files, member.organizationId));
-  return NextResponse.json({ ocrStatus: "queued" });
+  return NextResponse.json({ ocrStatus: "processing" });
 }

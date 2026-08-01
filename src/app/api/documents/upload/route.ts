@@ -6,7 +6,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { after } from "next/server";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 300;
 
 const allowedExtensions = new Set([
   "pdf",
@@ -89,6 +89,7 @@ export async function POST(request: Request) {
   const documentId = crypto.randomUUID();
   const serviceHeaders = adminHeaders(serviceKey);
   const storedPaths: string[] = [];
+  let documentCreated = false;
   try {
     for (const [index, file] of files.entries()) {
       const extension = supportedExtension(file);
@@ -124,13 +125,16 @@ export async function POST(request: Request) {
           organization_id: member.organizationId,
           uploaded_by: member.userId,
           page_count: files.length,
-          status: "uploaded",
+          status: "processing",
+          ocr_attempt_count: 1,
+          ocr_last_attempt_at: new Date().toISOString(),
         }),
         signal: AbortSignal.timeout(10_000),
       },
     );
     if (!documentInsert.ok)
       throw new Error(`Document insert failed: ${documentInsert.status}`);
+    documentCreated = true;
     const pagesInsert = await fetch(
       `${supabaseUrl}/rest/v1/mandate_document_pages`,
       {
@@ -171,15 +175,25 @@ export async function POST(request: Request) {
       entityType: "mandate_document",
       entityId: documentId,
       details: { pageCount: files.length },
-    });
+    }).catch((auditError) =>
+      console.error("Document upload audit failed", auditError),
+    );
     return NextResponse.json({
       mode: "supabase",
       documentId,
       pages: files.length,
-      ocrStatus: "queued",
+      ocrStatus: "processing",
     });
   } catch (error) {
     console.error("Document upload failed", error);
+    if (documentCreated)
+      await fetch(
+        `${supabaseUrl}/rest/v1/mandate_documents?id=eq.${encodeURIComponent(documentId)}&organization_id=eq.${member.organizationId}`,
+        {
+          method: "DELETE",
+          headers: serviceHeaders,
+        },
+      ).catch(() => null);
     if (storedPaths.length)
       await fetch(`${supabaseUrl}/storage/v1/object/mandate-documents`, {
         method: "DELETE",

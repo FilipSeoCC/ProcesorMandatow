@@ -236,6 +236,14 @@ async function updateDocument(
   if (!response.ok) throw new Error(`OCR_UPDATE_${response.status}`);
 }
 
+export async function markMandateOcrProcessing(documentId: string) {
+  await updateDocument(documentId, {
+    status: "processing",
+    ocr_error: "",
+    ocr_last_attempt_at: new Date().toISOString(),
+  });
+}
+
 export async function processMandateOcr(
   documentId: string,
   files: OcrFile[],
@@ -249,7 +257,7 @@ export async function processMandateOcr(
     return;
   }
   try {
-    await updateDocument(documentId, { status: "processing", ocr_error: "" });
+    await markMandateOcrProcessing(documentId);
     const pageTexts = await Promise.all(files.map(readWithDocumentAi));
     const rawText = pageTexts.join("\n\n--- PAGE ---\n\n").trim();
     const fields = extractMandateFields(rawText);
@@ -279,23 +287,25 @@ export async function processMandateOcr(
     }
 
     await updateDocument(documentId, {
-      status: ready ? "ready" : "needs_review",
+      // "ready" means the whole automatic stage succeeded: OCR extracted the
+      // matching keys and the fleet history identified exactly who had the
+      // vehicle. Sending remains a separate, manual employee action.
+      status: ready && match ? "ready" : "needs_review",
       ocr_text: rawText,
       registration_number: fields.registrationNumber,
       event_at: fields.eventAt,
       letter_date: fields.letterDate,
       case_number: fields.caseNumber,
       sender: fields.sender,
-      extraction_confidence: fields.confidence,
+      extraction_confidence: {
+        ...fields.confidence,
+        customerMatch: match ? 1 : 0,
+      },
       ocr_error: "",
       processed_at: new Date().toISOString(),
-      ...(match
-        ? {
-            responsible_name: match.name,
-            responsible_tax_id: match.taxId,
-            responsible_email: match.email,
-          }
-        : {}),
+      responsible_name: match?.name ?? "",
+      responsible_tax_id: match?.taxId ?? "",
+      responsible_email: match?.email ?? "",
     });
   } catch (error) {
     console.error("Mandate OCR failed", error);
