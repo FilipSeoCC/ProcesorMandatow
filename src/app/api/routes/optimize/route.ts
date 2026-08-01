@@ -58,7 +58,8 @@ export async function POST(request: Request) {
 
   const now = new Date();
   const depotLocation = { latitude: body.depot.latitude, longitude: body.depot.longitude };
-  const googleRequest = { model: { globalStartTime: now.toISOString(), globalEndTime: new Date(now.getTime() + 16 * 60 * 60 * 1000).toISOString(), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s` }] })), vehicles: [{ label: "Wadim", startLocation: depotLocation, ...(body.returnToDepot === false ? {} : { endLocation: depotLocation }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
+  const wholeSecondIso = (date: Date) => date.toISOString().replace(/\.\d+Z$/, "Z");
+  const googleRequest = { model: { globalStartTime: wholeSecondIso(now), globalEndTime: wholeSecondIso(new Date(now.getTime() + 16 * 60 * 60 * 1000)), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s` }] })), vehicles: [{ label: "Wadim", startLocation: depotLocation, ...(body.returnToDepot === false ? {} : { endLocation: depotLocation }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
   try {
     // Route Optimization API doesn't accept API keys — it requires a full
     // OAuth2/IAM principal, so we reuse the same WIF client as Document AI.
