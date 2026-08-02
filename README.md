@@ -1,5 +1,7 @@
 # Procesor Mandatów — PoC
 
+> Część portfolio [AIOps](https://www.ai-ops.pl) — wdrożenia AI i automatyzacja procesów dla firm. Zobacz [żywe demo](https://procesor-mandatow.vercel.app/).
+
 Responsywny prototyp interfejsu do obsługi korespondencji mandatowej dla firmy zarządzającej flotą pojazdów.
 
 ## Zakres demonstracji
@@ -64,3 +66,7 @@ Plik `supabase/schema.sql` zawiera fundament bazy dla:
 Po uruchomieniu schematu pierwszy zalogowany użytkownik tworzy firmę przez funkcję RPC `bootstrap_organization`. Skaner zapisuje pliki w Supabase tylko po zweryfikowaniu roli `admin`, `office` lub `scanner`; bez konfiguracji wyraźnie pokazuje tryb demonstracyjny.
 
 Adresy dostaw są przekazywane do Google w celu wyznaczenia trasy. Przed wdrożeniem produkcyjnym należy ująć ten proces w dokumentacji RODO i właściwych umowach powierzenia.
+
+---
+
+Zbudowane przez [AIOps](https://www.ai-ops.pl) — konsulting i wdrożenia AI dla firm w Polsce.
