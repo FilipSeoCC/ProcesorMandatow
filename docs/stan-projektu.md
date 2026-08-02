@@ -62,7 +62,13 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
   (`/api/internal/documents/rematch`).
 - Flota i pracownicy — realny zapis do bazy, edycja, import CSV/XML floty.
 - Generowanie wezwania PDF, pakietu do pracownika i pisma do urzędu.
-- Log audytowy, zgłaszanie błędów ze zrzutem ekranu, panel administracyjny.
+- Log audytowy, zgłaszanie błędów ze zrzutem ekranu (stały przycisk w lewym
+  dolnym rogu, nad kartą konta — dla każdej roli; lista/panel zgłoszeń w
+  zakładce „Błędy" — tylko `admin`).
+- Każdy użytkownik może sam zmienić swoje imię i nazwisko w Ustawieniach
+  (`PATCH /api/auth` z `firstName`/`lastName`) — nie ma już hardkodowanej mapy
+  nadpisań e-mail→imię w `workspace.tsx` (był tam realny błąd: konto
+  fkedziora@wenet.pl wyświetlało się jako „user Kędziora").
 - Otwarta rejestracja (bez zaproszenia) z bramką zatwierdzania — nowe konto nie
   loguje się, dopóki admin/boss nie nada mu roli. Zarządzanie kontami/rolami
   scalone z widokiem **Pracownicy** (tabela kont, widoczna dla admin/boss;
