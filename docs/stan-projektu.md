@@ -71,12 +71,12 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 
 ### 1. ~~Nie da się dodać drugiego użytkownika~~ — rozwiązane 2026-08-02
 
-Filip zdecydował: rejestracja jest teraz otwarta (`ALLOW_PUBLIC_SIGNUP=true`),
-każde nowe konto dołącza automatycznie jako `user` (`bootstrap_organization`
-już nie blokuje drugiej rejestracji). Model ról uproszczony do trzech:
+Filip zdecydował: rejestracja jest zawsze otwarta (bez zaproszenia), ale nie
+loguje od razu. Model ról uproszczony do trzech:
 
-- `admin` — pełny dostęp, w tym zarządzanie zespołem/rolami (widok **Zespół**),
-- `boss` — to co `user`, plus zatwierdzanie spraw („Zatwierdź dane"),
+- `admin` — pełny dostęp, w tym zarządzanie kontami/rolami,
+- `boss` — to co `user`, plus zatwierdzanie spraw („Zatwierdź dane") i
+  zatwierdzanie nowych kont (może nadać najwyżej `boss`, nie rusza adminów),
 - `user` — cała codzienna obsługa spraw/floty/tras, bez zatwierdzania.
 
 Stare, drobniejsze role (`dispatcher`, `office`, `scanner`, `viewer`) zostają w
@@ -84,7 +84,19 @@ enumie bazy tylko dla zgodności wstecznej (migracja w `schema.sql` przepisuje
 istniejące rekordy na `user`) — **nie używaj ich ponownie** w RLS ani
 w sprawdzaniu ról w endpointach.
 
-Zmianę roli robi się teraz w UI (Zespół, tylko dla admina), nie w SQL.
+**Bramka zatwierdzania (dodana 2026-08-02)**: `organization_members` ma teraz
+kolumnę `status` (`pending`/`active`, domyślnie `active` — istniejące konta nie
+są dotknięte). Każde nowe samodzielnie zarejestrowane konto dostaje
+`role='user', status='pending'` i **nie może się zalogować** —
+`is_org_member`/`has_org_role` w SQL i sprawdzenie w `POST /api/auth` (branch
+logowania) wymagają `status='active'`. Admin/boss nadaje rolę w tabeli kont na
+ekranie **Pracownicy** (`PATCH /api/team`), co jednocześnie ustawia
+`status='active'` — to jest cała "akceptacja konta", nie ma osobnego kroku.
+Dwa maile przez Resend: od razu po rejestracji ("dziękujemy, czekaj na
+zatwierdzenie") i po nadaniu roli ("masz dostęp") — patrz
+`src/lib/account-emails.ts`. Pierwszy użytkownik organizacji (nie ma kogo
+zatwierdzać) zawsze ląduje jako `admin`/`active`.
+
 Zabezpieczenie: nie da się odebrać roli admina samemu sobie, jeśli jest się
 jedynym adminem w organizacji.
 

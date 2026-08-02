@@ -338,7 +338,7 @@ export default function MandatyWorkspace() {
   const [selectedCaseIds, setSelectedCaseIds] = useState<Set<string>>(new Set());
   const [bulkWorking, setBulkWorking] = useState(false);
   const [team, setTeam] = useState<
-    Array<{ userId: string; role: string; email: string | null; name: string | null }>
+    Array<{ userId: string; role: string; status: string; email: string | null; name: string | null }>
   >([]);
   const [teamUpdating, setTeamUpdating] = useState<string | null>(null);
   const [teamError, setTeamError] = useState<string | null>(null);

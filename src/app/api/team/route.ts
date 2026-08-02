@@ -2,6 +2,24 @@ import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 import { writeAuditEvent } from "@/lib/audit";
+import { buildRoleGrantedEmail } from "@/lib/account-emails";
+
+async function sendRoleGrantedEmail(email: string, name: string, role: string, appUrl: string) {
+  const resendKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.RESEND_FROM_EMAIL?.trim();
+  if (!resendKey || !from) return;
+  const mail = buildRoleGrantedEmail(name, role, appUrl);
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [email], subject: mail.subject, html: mail.html, text: mail.text }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (reason) {
+    console.error("Resend role-granted email failed", reason);
+  }
+}
 
 export const runtime = "nodejs";
 
@@ -25,7 +43,7 @@ export async function GET(request: Request) {
   };
 
   const membersResponse = await fetch(
-    `${url}/rest/v1/organization_members?select=user_id,role&organization_id=eq.${member.organizationId}`,
+    `${url}/rest/v1/organization_members?select=user_id,role,status&organization_id=eq.${member.organizationId}`,
     { headers: adminAuthHeaders, cache: "no-store" },
   );
   if (!membersResponse.ok)
@@ -36,6 +54,7 @@ export async function GET(request: Request) {
   const members = (await membersResponse.json()) as Array<{
     user_id: string;
     role: string;
+    status: string;
   }>;
 
   const team = await Promise.all(
@@ -45,7 +64,7 @@ export async function GET(request: Request) {
         { headers: adminAuthHeaders, cache: "no-store" },
       );
       if (!userResponse.ok)
-        return { userId: item.user_id, role: item.role, email: null, name: null };
+        return { userId: item.user_id, role: item.role, status: item.status, email: null, name: null };
       const user = (await userResponse.json()) as {
         email?: string;
         user_metadata?: { first_name?: string; last_name?: string };
@@ -56,6 +75,7 @@ export async function GET(request: Request) {
       return {
         userId: item.user_id,
         role: item.role,
+        status: item.status,
         email: user.email ?? null,
         name,
       };
@@ -97,20 +117,20 @@ export async function PATCH(request: Request) {
     );
   const headers = adminHeaders(secretKey);
 
-  if (member.role === "boss") {
-    const targetResponse = await fetch(
-      `${url}/rest/v1/organization_members?select=role&organization_id=eq.${member.organizationId}&user_id=eq.${encodeURIComponent(targetUserId)}`,
-      { headers, cache: "no-store" },
+  const targetResponse = await fetch(
+    `${url}/rest/v1/organization_members?select=role,status&organization_id=eq.${member.organizationId}&user_id=eq.${encodeURIComponent(targetUserId)}`,
+    { headers, cache: "no-store" },
+  );
+  const targets = targetResponse.ok
+    ? ((await targetResponse.json()) as Array<{ role: string; status: string }>)
+    : [];
+  const targetWasPending = targets[0]?.status === "pending";
+
+  if (member.role === "boss" && targets[0]?.role === "admin")
+    return NextResponse.json(
+      { error: "Rola boss nie może zmieniać uprawnień administratora." },
+      { status: 403 },
     );
-    const targets = targetResponse.ok
-      ? ((await targetResponse.json()) as Array<{ role: string }>)
-      : [];
-    if (targets[0]?.role === "admin")
-      return NextResponse.json(
-        { error: "Rola boss nie może zmieniać uprawnień administratora." },
-        { status: 403 },
-      );
-  }
 
   // Refuse to demote the last admin — otherwise a lone admin could lock
   // everyone (including themselves) out of role management permanently.
@@ -134,7 +154,10 @@ export async function PATCH(request: Request) {
     {
       method: "PATCH",
       headers: { ...headers, "Content-Type": "application/json", Prefer: "return=minimal" },
-      body: JSON.stringify({ role }),
+      // Assigning a role IS the approval action for a pending account — no
+      // separate "approve" step, matching Filip's ask that admin/boss grant
+      // access and a role in one move.
+      body: JSON.stringify({ role, status: "active" }),
     },
   );
   if (!response.ok)
@@ -150,5 +173,25 @@ export async function PATCH(request: Request) {
     entityId: targetUserId,
     details: { role },
   });
+  if (targetWasPending) {
+    const userResponse = await fetch(`${url}/auth/v1/admin/users/${targetUserId}`, {
+      headers,
+      cache: "no-store",
+    });
+    if (userResponse.ok) {
+      const user = (await userResponse.json()) as {
+        email?: string;
+        user_metadata?: { first_name?: string; last_name?: string };
+      };
+      if (user.email) {
+        const name = [user.user_metadata?.first_name, user.user_metadata?.last_name]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        const appUrl = process.env.APP_URL?.trim() || new URL(request.url).origin;
+        await sendRoleGrantedEmail(user.email, name, role, appUrl);
+      }
+    }
+  }
   return NextResponse.json({ ok: true });
 }

@@ -33,6 +33,16 @@ create table if not exists public.organization_members (
   role public.app_role not null default 'user', display_name text not null default '', phone text not null default '',
   created_at timestamptz not null default now(), primary key (organization_id,user_id)
 );
+-- 'pending' accounts (self-registered, awaiting an admin/boss to assign a
+-- role) cannot log in or read/write anything — see is_org_member/has_org_role
+-- below, both now require status='active'. The column default is 'active'
+-- so ADD COLUMN backfills every pre-existing row (real accounts already in
+-- production) without a separate UPDATE.
+alter table public.organization_members add column if not exists status text not null default 'active';
+do $$ begin
+  alter table public.organization_members add constraint organization_members_status_check check (status in ('pending','active'));
+exception when duplicate_object then null;
+end $$;
 create table if not exists public.customers (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   name text not null, tax_id text not null default '', email text not null default '', phone text not null default '', address text not null default '',
@@ -145,28 +155,29 @@ create table if not exists public.audit_events (
 );
 
 create or replace function public.is_org_member(org_id uuid) returns boolean language sql stable security definer set search_path=public as $$
- select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid()) $$;
+ select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid() and status='active') $$;
 create or replace function public.has_org_role(org_id uuid, allowed public.app_role[]) returns boolean language sql stable security definer set search_path=public as $$
- select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid() and role=any(allowed)) $$;
+ select exists(select 1 from public.organization_members where organization_id=org_id and user_id=auth.uid() and status='active' and role=any(allowed)) $$;
 create or replace function public.bootstrap_organization(company_name text) returns uuid language plpgsql security definer set search_path=public as $$
 declare created_id uuid; existing_id uuid;
 begin
   if auth.uid() is null then raise exception 'Not authenticated'; end if;
   if exists(select 1 from public.organization_members where user_id=auth.uid()) then raise exception 'User already belongs to an organization'; end if;
-  -- Deliberately simple for now (Filip's call): signup itself is already
-  -- gated by ALLOW_PUBLIC_SIGNUP at the API layer, so anyone who reaches
-  -- this RPC has already cleared that gate. Every self-registered account
-  -- joins the existing org as the lowest-privilege working role ('user')
-  -- — same visibility as any other user. Promotion to 'admin'/'boss' is a
-  -- manual step from the Zespol (team) UI, and the sensitive "zatwierdz
-  -- dane" action is restricted to admin+boss at the API layer, not here.
+  -- Filip's call: registration is open (no invite gate), but a self-
+  -- registered account joining an EXISTING org lands as role='user',
+  -- status='pending' — is_org_member/has_org_role both require
+  -- status='active', so a pending account can't read/write anything and
+  -- the API layer (api/auth POST, sign-in branch) blocks login outright
+  -- until an admin/boss assigns a role via PATCH /api/team, which also
+  -- flips status to 'active'. The very first person ever (no existing org)
+  -- has no one to approve them, so they must land active as admin.
   select id into existing_id from public.organizations order by created_at asc limit 1;
   if existing_id is not null then
-    insert into public.organization_members(organization_id,user_id,role) values(existing_id,auth.uid(),'user');
+    insert into public.organization_members(organization_id,user_id,role,status) values(existing_id,auth.uid(),'user','pending');
     return existing_id;
   end if;
   insert into public.organizations(name,owner_id) values(coalesce(nullif(trim(company_name),''),'Moja firma'),auth.uid()) returning id into created_id;
-  insert into public.organization_members(organization_id,user_id,role) values(created_id,auth.uid(),'admin');
+  insert into public.organization_members(organization_id,user_id,role,status) values(created_id,auth.uid(),'admin','active');
   return created_id;
 end $$;
 revoke all on function public.bootstrap_organization(text) from public;

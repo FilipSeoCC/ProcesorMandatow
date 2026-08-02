@@ -16,6 +16,7 @@ export type Employee = {
 export type TeamMember = {
   userId: string;
   role: string;
+  status: string;
   email: string | null;
   name: string | null;
 };
@@ -342,14 +343,21 @@ export default function Employees({
               <tbody>
                 {team.map((member) => {
                   const locked = viewerRole === "boss" && member.role === "admin";
+                  const isPendingAccount = member.status === "pending";
                   const pending =
                     teamPending?.userId === member.userId ? teamPending.role : null;
+                  const selected = pending ?? member.role;
                   const saving = teamUpdating === member.userId;
+                  const showConfirm =
+                    !locked && (isPendingAccount || (pending !== null && pending !== member.role));
                   return (
                     <tr key={member.userId}>
                       <td>
                         <strong>{member.name || member.email || member.userId}</strong>
                         {member.name && member.email && <span>{member.email}</span>}
+                        {isPendingAccount && (
+                          <span className={styles.activeStatus}>Oczekuje na zatwierdzenie</span>
+                        )}
                       </td>
                       <td>
                         {locked ? (
@@ -360,7 +368,7 @@ export default function Employees({
                           <label className={wstyles.selectBox}>
                             <span className={wstyles.srOnly}>Rola</span>
                             <select
-                              value={pending ?? member.role}
+                              value={selected}
                               disabled={saving}
                               onChange={(event) =>
                                 onStagePendingRole(
@@ -378,24 +386,26 @@ export default function Employees({
                         )}
                       </td>
                       <td className={styles.rowActions}>
-                        {!locked && pending && pending !== member.role && (
+                        {showConfirm && (
                           <>
                             <button
                               type="button"
                               className={wstyles.primaryButton}
                               disabled={saving}
-                              onClick={() => onConfirmRole(member.userId, pending)}
+                              onClick={() => onConfirmRole(member.userId, selected as "admin" | "boss" | "user")}
                             >
                               {saving ? "Zapisuję…" : "Zatwierdź"}
                             </button>
-                            <button
-                              type="button"
-                              className={wstyles.secondaryButton}
-                              disabled={saving}
-                              onClick={onCancelRole}
-                            >
-                              Anuluj
-                            </button>
+                            {pending !== null && (
+                              <button
+                                type="button"
+                                className={wstyles.secondaryButton}
+                                disabled={saving}
+                                onClick={onCancelRole}
+                              >
+                                Anuluj
+                              </button>
+                            )}
                           </>
                         )}
                       </td>
@@ -408,13 +418,20 @@ export default function Employees({
           <div className={styles.mobileCards}>
             {team.map((member) => {
               const locked = viewerRole === "boss" && member.role === "admin";
+              const isPendingAccount = member.status === "pending";
               const pending =
                 teamPending?.userId === member.userId ? teamPending.role : null;
+              const selected = pending ?? member.role;
               const saving = teamUpdating === member.userId;
+              const showConfirm =
+                !locked && (isPendingAccount || (pending !== null && pending !== member.role));
               return (
                 <article key={member.userId}>
                   <h3>{member.name || member.email || member.userId}</h3>
                   {member.name && member.email && <p>{member.email}</p>}
+                  {isPendingAccount && (
+                    <span className={styles.activeStatus}>Oczekuje na zatwierdzenie</span>
+                  )}
                   {locked ? (
                     <span className={styles.activeStatus}>
                       <ShieldCheck size={12} /> Admin
@@ -424,7 +441,7 @@ export default function Employees({
                       <label className={wstyles.selectBox}>
                         <span className={wstyles.srOnly}>Rola</span>
                         <select
-                          value={pending ?? member.role}
+                          value={selected}
                           disabled={saving}
                           onChange={(event) =>
                             onStagePendingRole(
@@ -439,24 +456,26 @@ export default function Employees({
                         </select>
                         <ChevronDown size={16} />
                       </label>
-                      {pending && pending !== member.role && (
+                      {showConfirm && (
                         <span className={styles.mobileRowActions}>
                           <button
                             type="button"
                             className={wstyles.primaryButton}
                             disabled={saving}
-                            onClick={() => onConfirmRole(member.userId, pending)}
+                            onClick={() => onConfirmRole(member.userId, selected as "admin" | "boss" | "user")}
                           >
                             {saving ? "Zapisuję…" : "Zatwierdź"}
                           </button>
-                          <button
-                            type="button"
-                            className={wstyles.secondaryButton}
-                            disabled={saving}
-                            onClick={onCancelRole}
-                          >
-                            Anuluj
-                          </button>
+                          {pending !== null && (
+                            <button
+                              type="button"
+                              className={wstyles.secondaryButton}
+                              disabled={saving}
+                              onClick={onCancelRole}
+                            >
+                              Anuluj
+                            </button>
+                          )}
                         </span>
                       )}
                     </>
