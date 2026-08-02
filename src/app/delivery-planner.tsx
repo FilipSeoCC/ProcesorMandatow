@@ -20,11 +20,12 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import styles from "./delivery-planner.module.css";
 
 type Delivery = {
   id: string;
+  vehicleId: string;
   vehicle: string;
   customer: string;
   address: string;
@@ -33,62 +34,39 @@ type Delivery = {
   serviceMinutes: number;
   priority: number;
 };
-type Optimization = {
-  mode: "demo" | "google";
-  orderedStopIds: string[];
+type PlanStop = {
+  stopId: string;
+  deliveryId: string;
+  vehicle: string;
+  customer: string;
+  address: string;
+  latitude: number;
+  longitude: number;
+  serviceMinutes: number;
+  status: "planned" | "delivered" | "failed";
+  notes: string;
+};
+type Plan = {
+  id: string;
+  startAddress: string;
+  mode: string;
   distanceKm: number;
   durationMinutes: number;
-  skippedStopIds: string[];
-  warning?: string;
+  stops: PlanStop[];
+};
+type OptimizeWarning = { skippedCustomers: string[]; warning?: string };
+type FleetVehicle = {
+  id: string;
+  brand: string;
+  model: string;
+  registration: string;
+  customer: string;
 };
 const depot = {
   address: "Aleje Jerozolimskie 228, 02-495 Warszawa",
   latitude: 52.18798,
   longitude: 20.91054,
 };
-const routeDraftKey = "flotaflow-route-draft-v1";
-const initialDeliveries: Delivery[] = [
-  {
-    id: "DST-104",
-    vehicle: "Toyota Proace · WI 2847K",
-    customer: "Nova Bud Sp. z o.o.",
-    address: "Puławska 427, Warszawa",
-    latitude: 52.1455,
-    longitude: 21.0218,
-    serviceMinutes: 20,
-    priority: 4,
-  },
-  {
-    id: "DST-105",
-    vehicle: "Ford Transit · WW 91R2",
-    customer: "Verto Group Sp. z o.o.",
-    address: "Postępu 14, Warszawa",
-    latitude: 52.1798,
-    longitude: 20.9981,
-    serviceMinutes: 25,
-    priority: 3,
-  },
-  {
-    id: "DST-106",
-    vehicle: "Mercedes Vito · WX 5520M",
-    customer: "ABC Instalacje",
-    address: "Mickiewicza 22, Łomianki",
-    latitude: 52.3342,
-    longitude: 20.8862,
-    serviceMinutes: 20,
-    priority: 2,
-  },
-  {
-    id: "DST-107",
-    vehicle: "Renault Master · WPR 77A9",
-    customer: "M-Projekt",
-    address: "Sienkiewicza 31, Pruszków",
-    latitude: 52.1692,
-    longitude: 20.8026,
-    serviceMinutes: 30,
-    priority: 1,
-  },
-];
 
 function storedAccessToken() {
   for (let index = 0; index < localStorage.length; index++) {
@@ -102,18 +80,28 @@ function storedAccessToken() {
   return null;
 }
 
+function authHeaders() {
+  const token = storedAccessToken();
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 export default function DeliveryPlanner() {
-  const [deliveries, setDeliveries] = useState(initialDeliveries);
-  const [selected, setSelected] = useState<string[]>(
-    initialDeliveries.map((item) => item.id),
-  );
-  const [result, setResult] = useState<Optimization | null>(null);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
+  const [deliveriesLoading, setDeliveriesLoading] = useState(true);
+  const [fleetVehicles, setFleetVehicles] = useState<FleetVehicle[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+  const [optimizeWarning, setOptimizeWarning] = useState<OptimizeWarning | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addForm, setAddForm] = useState({
     customer: "",
-    vehicle: "",
+    vehicleId: "",
     address: "",
     serviceMinutes: "20",
     priority: "3",
@@ -121,65 +109,71 @@ export default function DeliveryPlanner() {
   const [geocoding, setGeocoding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [routeDirty, setRouteDirty] = useState(false);
-  const [completedIds, setCompletedIds] = useState<string[]>([]);
-  const [failedIds, setFailedIds] = useState<string[]>([]);
-  const [draftReady, setDraftReady] = useState(false);
   const [pendingAction, setPendingAction] = useState<
     "complete" | "failed" | null
   >(null);
   const [failureReason, setFailureReason] = useState("Klient nieobecny");
-  const ordered = useMemo(
-    () =>
-      result
-        ? result.orderedStopIds
-            .map((id) => deliveries.find((item) => item.id === id))
-            .filter((item): item is Delivery => Boolean(item))
-        : deliveries.filter((item) => selected.includes(item.id)),
-    [deliveries, result, selected],
-  );
-  const currentStop = ordered.find(
-    (item) => !completedIds.includes(item.id) && !failedIds.includes(item.id),
-  );
-  const routeStarted = completedIds.length > 0 || failedIds.length > 0;
+  const [stopActionLoading, setStopActionLoading] = useState(false);
+  const [changingDeliveries, setChangingDeliveries] = useState(false);
 
-  useEffect(() => {
+  const ordered = plan?.stops ?? [];
+  const currentStop = ordered.find((item) => item.status === "planned");
+  const routeStarted = ordered.some((item) => item.status !== "planned");
+
+  async function loadDeliveries() {
+    setDeliveriesLoading(true);
     try {
-      const draft = JSON.parse(localStorage.getItem(routeDraftKey) || "null");
-      if (draft?.result?.orderedStopIds && Array.isArray(draft.selected)) {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the saved route draft on mount; localStorage cannot be read during render
-        setSelected(draft.selected);
-        setResult(draft.result);
-        setCompletedIds(
-          Array.isArray(draft.completedIds) ? draft.completedIds : [],
+      const response = await fetch("/api/routes/deliveries", {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) {
+        setDeliveries(data.deliveries ?? []);
+        setSelected((current) =>
+          current.filter((id) =>
+            (data.deliveries ?? []).some((item: Delivery) => item.id === id),
+          ),
         );
-        setFailedIds(Array.isArray(draft.failedIds) ? draft.failedIds : []);
-        setRouteDirty(Boolean(draft.routeDirty));
       }
-    } catch {}
-    setDraftReady(true);
-  }, []);
+    } finally {
+      setDeliveriesLoading(false);
+    }
+  }
+
+  async function loadPlan() {
+    setPlanLoading(true);
+    try {
+      const response = await fetch("/api/routes/plan", {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setPlan(data.plan ?? null);
+    } finally {
+      setPlanLoading(false);
+    }
+  }
 
   useEffect(() => {
-    if (!draftReady) return;
-    if (!result) localStorage.removeItem(routeDraftKey);
-    else
-      localStorage.setItem(
-        routeDraftKey,
-        JSON.stringify({
-          selected,
-          result,
-          completedIds,
-          failedIds,
-          routeDirty,
-        }),
-      );
-  }, [completedIds, draftReady, failedIds, result, routeDirty, selected]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern used throughout this codebase
+    loadDeliveries();
+    loadPlan();
+    fetch("/api/fleet/vehicles", { headers: authHeaders(), cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => setFleetVehicles(data.vehicles ?? []))
+      .catch(() => {});
+  }, []);
 
   async function addDelivery() {
     const customer = addForm.customer.trim();
     const address = addForm.address.trim();
     const serviceMinutes = Number(addForm.serviceMinutes);
     const priority = Number(addForm.priority);
+    if (!addForm.vehicleId) {
+      setAddError("Wybierz pojazd z floty.");
+      return;
+    }
     if (!customer || !address) {
       setAddError("Podaj klienta i adres dostawy.");
       return;
@@ -191,38 +185,35 @@ export default function DeliveryPlanner() {
     setGeocoding(true);
     setAddError(null);
     try {
-      const token = storedAccessToken();
-      const response = await fetch("/api/routes/geocode", {
+      const geocodeResponse = await fetch("/api/routes/geocode", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders(),
         body: JSON.stringify({ address }),
       });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(data.error || "Nie udało się znaleźć adresu.");
-      const id = `DST-${Date.now().toString(36).toUpperCase()}`;
-      setDeliveries((current) => [
-        ...current,
-        {
-          id,
-          vehicle: addForm.vehicle.trim() || "Nieprzypisany",
+      const geocodeData = await geocodeResponse.json();
+      if (!geocodeResponse.ok)
+        throw new Error(geocodeData.error || "Nie udało się znaleźć adresu.");
+      const createResponse = await fetch("/api/routes/deliveries", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          vehicleId: addForm.vehicleId,
           customer,
-          address: data.formattedAddress || address,
-          latitude: data.latitude,
-          longitude: data.longitude,
+          address: geocodeData.formattedAddress || address,
+          latitude: geocodeData.latitude,
+          longitude: geocodeData.longitude,
           serviceMinutes,
           priority: Math.min(5, Math.max(1, priority || 3)),
-        },
-      ]);
-      setSelected((current) => [...current, id]);
-      setResult(null);
-      setRouteDirty(false);
+        }),
+      });
+      const createData = await createResponse.json().catch(() => ({}));
+      if (!createResponse.ok)
+        throw new Error(createData.error || "Nie udało się dodać dostawy.");
+      await loadDeliveries();
+      setSelected((current) => [...current, createData.id]);
       setAddForm({
         customer: "",
-        vehicle: "",
+        vehicleId: "",
         address: "",
         serviceMinutes: "20",
         priority: "3",
@@ -237,61 +228,95 @@ export default function DeliveryPlanner() {
     }
   }
 
-  function removeDelivery(id: string) {
+  async function removeDelivery(id: string) {
+    const response = await fetch(`/api/routes/deliveries/${id}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setError(data.error || "Nie udało się usunąć dostawy.");
+      return;
+    }
     setDeliveries((current) => current.filter((item) => item.id !== id));
     setSelected((current) => current.filter((item) => item !== id));
-    setResult(null);
-    setRouteDirty(false);
   }
 
   function toggle(id: string) {
-    setResult(null);
-    setRouteDirty(false);
     setSelected((current) =>
       current.includes(id)
         ? current.filter((item) => item !== id)
         : [...current, id],
     );
   }
+
+  async function persistOrder(stopIds: string[]) {
+    if (!plan) return;
+    setRouteDirty(true);
+    const response = await fetch("/api/routes/plan/reorder", {
+      method: "POST",
+      headers: authHeaders(),
+      body: JSON.stringify({ planId: plan.id, stopIds }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      setError(data.error || "Nie udało się zapisać nowej kolejności.");
+    }
+  }
+
   function move(index: number, direction: -1 | 1) {
     const next = [...ordered];
     const target = index + direction;
     if (target < 0 || target >= next.length) return;
     [next[index], next[target]] = [next[target], next[index]];
-    setResult((current) =>
-      current
-        ? {
-            ...current,
-            orderedStopIds: next.map((item) => item.id),
-            warning:
-              "Kolejność zmieniona ręcznie — przelicz trasę przed startem.",
-          }
-        : current,
-    );
-    setRouteDirty(true);
+    setPlan((current) => (current ? { ...current, stops: next } : current));
+    persistOrder(next.map((item) => item.stopId));
   }
-  function confirmStopAction() {
-    if (!currentStop || !pendingAction) return;
-    if (pendingAction === "complete")
-      setCompletedIds((current) => [...current, currentStop.id]);
-    else setFailedIds((current) => [...current, currentStop.id]);
-    setPendingAction(null);
-  }
+
   function postponeCurrent() {
     if (!currentStop) return;
-    setResult((current) =>
-      current
-        ? {
-            ...current,
-            orderedStopIds: [
-              ...current.orderedStopIds.filter((id) => id !== currentStop.id),
-              currentStop.id,
-            ],
-            warning: "Bieżąca dostawa została przeniesiona na koniec planu.",
-          }
-        : current,
-    );
+    const next = [
+      ...ordered.filter((item) => item.stopId !== currentStop.stopId),
+      currentStop,
+    ];
+    setPlan((current) => (current ? { ...current, stops: next } : current));
+    persistOrder(next.map((item) => item.stopId));
   }
+
+  async function confirmStopAction() {
+    if (!currentStop || !pendingAction) return;
+    setStopActionLoading(true);
+    try {
+      const status = pendingAction === "complete" ? "delivered" : "failed";
+      const notes = pendingAction === "failed" ? failureReason : "";
+      const response = await fetch(`/api/routes/plan/stops/${currentStop.stopId}`, {
+        method: "PATCH",
+        headers: authHeaders(),
+        body: JSON.stringify({ status, notes }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się zapisać statusu dostawy.");
+      setPlan((current) =>
+        current
+          ? {
+              ...current,
+              stops: current.stops.map((item) =>
+                item.stopId === currentStop.stopId ? { ...item, status, notes } : item,
+              ),
+            }
+          : current,
+      );
+      setPendingAction(null);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Nie udało się zapisać statusu dostawy.",
+      );
+    } finally {
+      setStopActionLoading(false);
+    }
+  }
+
   async function optimize() {
     const stops = deliveries.filter((item) => selected.includes(item.id));
     if (stops.length < 2) {
@@ -301,22 +326,49 @@ export default function DeliveryPlanner() {
     setLoading(true);
     setError(null);
     try {
-      const token = storedAccessToken();
       const response = await fetch("/api/routes/optimize", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: authHeaders(),
         body: JSON.stringify({ depot, returnToDepot: true, stops }),
       });
       const data = await response.json();
       if (!response.ok)
         throw new Error(data.error || "Nie udało się ułożyć trasy.");
-      setResult(data);
-      setCompletedIds([]);
-      setFailedIds([]);
+      if (data.orderedStopIds.length < 2) {
+        setError(
+          "Za mało dostaw dało się zaplanować — sprawdź adresy i spróbuj ponownie.",
+        );
+        return;
+      }
+      const saveResponse = await fetch("/api/routes/plan", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({
+          startAddress: depot.address,
+          startLatitude: depot.latitude,
+          startLongitude: depot.longitude,
+          distanceMeters: data.distanceKm * 1000,
+          durationSeconds: data.durationMinutes * 60,
+          optimizationSource: data.mode,
+          stopOrder: data.orderedStopIds,
+        }),
+      });
+      const saveData = await saveResponse.json().catch(() => ({}));
+      if (!saveResponse.ok)
+        throw new Error(saveData.error || "Nie udało się zapisać trasy.");
+      setPlan(saveData.plan);
+      setOptimizeWarning(
+        data.warning || data.skippedStopIds?.length
+          ? {
+              warning: data.warning,
+              skippedCustomers: (data.skippedStopIds ?? []).map(
+                (id: string) => deliveries.find((item) => item.id === id)?.customer ?? id,
+              ),
+            }
+          : null,
+      );
       setRouteDirty(false);
+      await loadDeliveries();
     } catch (reason) {
       setError(
         reason instanceof Error
@@ -327,6 +379,20 @@ export default function DeliveryPlanner() {
       setLoading(false);
     }
   }
+
+  async function changeDeliveries() {
+    setChangingDeliveries(true);
+    try {
+      await fetch("/api/routes/plan", { method: "DELETE", headers: authHeaders() });
+      setPlan(null);
+      setOptimizeWarning(null);
+      setRouteDirty(false);
+      await loadDeliveries();
+    } finally {
+      setChangingDeliveries(false);
+    }
+  }
+
   // Navigate to the address, not to raw coordinates. Google reverse-geocodes a
   // bare lat/lng to the nearest named place, so the driver was shown things
   // like a school instead of "Postępu 14" and could not tell whether the pin
@@ -339,9 +405,7 @@ export default function DeliveryPlanner() {
   // driver ends up staring at some unrelated building.
   const mapsPoint = (stop: { address: string; latitude: number; longitude: number }) =>
     stop.address?.trim() || `${stop.latitude},${stop.longitude}`;
-  const remainingStops = ordered.filter(
-    (item) => !completedIds.includes(item.id) && !failedIds.includes(item.id),
-  );
+  const remainingStops = ordered.filter((item) => item.status === "planned");
   // Google's URL API accepts at most 9 intermediate waypoints; beyond that it
   // silently drops the tail, so we hand over one batch and the driver reopens
   // the link once those are done.
@@ -363,9 +427,11 @@ export default function DeliveryPlanner() {
       ? `Nawiguj całą trasą (${Math.min(remainingStops.length, WAYPOINT_LIMIT + 1)})`
       : "Nawiguj do klienta";
 
+  const busy = deliveriesLoading || planLoading;
+
   return (
     <div
-      className={`${styles.planner} ${result ? styles.plannerWithActions : ""}`}
+      className={`${styles.planner} ${plan ? styles.plannerWithActions : ""}`}
     >
       <section className={styles.hero}>
         <span>Plan dnia · Wadim</span>
@@ -386,7 +452,12 @@ export default function DeliveryPlanner() {
           </span>
         </div>
       </section>
-      {!result ? (
+      {busy ? (
+        <p className={styles.error} style={{ background: "transparent", color: "#64748b" }}>
+          <LoaderCircle className={styles.spin} size={17} />
+          Ładowanie planu…
+        </p>
+      ) : !plan ? (
         <>
           <section className={styles.depot}>
             <span>
@@ -418,6 +489,33 @@ export default function DeliveryPlanner() {
             {addOpen && (
               <div className={styles.addStopForm}>
                 <label>
+                  Pojazd
+                  <select
+                    value={addForm.vehicleId}
+                    onChange={(event) => {
+                      const vehicleId = event.target.value;
+                      const vehicle = fleetVehicles.find((item) => item.id === vehicleId);
+                      setAddForm((current) => ({
+                        ...current,
+                        vehicleId,
+                        customer:
+                          current.customer || (vehicle && vehicle.customer !== "Flota wewnętrzna"
+                            ? vehicle.customer
+                            : current.customer),
+                      }));
+                    }}
+                  >
+                    <option value="">
+                      {fleetVehicles.length ? "Wybierz pojazd z floty…" : "Brak pojazdów we flocie"}
+                    </option>
+                    {fleetVehicles.map((vehicle) => (
+                      <option key={vehicle.id} value={vehicle.id}>
+                        {vehicle.brand} {vehicle.model} · {vehicle.registration}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
                   Klient
                   <input
                     value={addForm.customer}
@@ -441,19 +539,6 @@ export default function DeliveryPlanner() {
                       }))
                     }
                     placeholder="Ulica, numer, miasto"
-                  />
-                </label>
-                <label>
-                  Pojazd (opcjonalnie)
-                  <input
-                    value={addForm.vehicle}
-                    onChange={(event) =>
-                      setAddForm((current) => ({
-                        ...current,
-                        vehicle: event.target.value,
-                      }))
-                    }
-                    placeholder="Np. Ford Transit · WI 2847K"
                   />
                 </label>
                 <div className={styles.addStopRow}>
@@ -540,6 +625,11 @@ export default function DeliveryPlanner() {
                   </button>
                 </div>
               ))}
+              {!deliveries.length && (
+                <p className={styles.error} style={{ background: "transparent", color: "#64748b" }}>
+                  Brak dostaw do zaplanowania. Dodaj pierwszą powyżej.
+                </p>
+              )}
             </div>
           </section>
           {error && (
@@ -575,45 +665,37 @@ export default function DeliveryPlanner() {
               </span>
               <strong>
                 {routeStarted
-                  ? `${completedIds.length}/${ordered.length}`
+                  ? `${ordered.filter((item) => item.status === "delivered").length}/${ordered.length}`
                   : routeDirty
                     ? "—"
-                    : `${result.distanceKm} km`}
+                    : `${plan.distanceKm} km`}
               </strong>
               <small>
                 {routeStarted
-                  ? `${failedIds.length} nieudane · ${ordered.length - completedIds.length - failedIds.length} pozostałe`
+                  ? `${ordered.filter((item) => item.status === "failed").length} nieudane · ${remainingStops.length} pozostałe`
                   : routeDirty
                     ? "Przelicz czas i dystans przed startem"
-                    : `około ${Math.floor(result.durationMinutes / 60)} h ${result.durationMinutes % 60} min · ${ordered.length} dostawy`}
+                    : `około ${Math.floor(plan.durationMinutes / 60)} h ${plan.durationMinutes % 60} min · ${ordered.length} dostawy`}
               </small>
             </div>
             <em>
-              {result.mode === "google"
-                ? "Google Optimization"
-                : "Tryb demonstracyjny"}
+              {plan.mode === "google" ? "Google Optimization" : "Tryb demonstracyjny"}
             </em>
           </section>
-          {result.warning && (
+          {optimizeWarning?.warning && (
             <p className={styles.warning}>
               <AlertTriangle size={16} />
-              {result.warning}
+              {optimizeWarning.warning}
             </p>
           )}
-          {result.skippedStopIds.length > 0 && (
+          {!!optimizeWarning?.skippedCustomers.length && (
             <p className={styles.error}>
               <AlertTriangle size={17} />
-              Nie udało się zaplanować:{" "}
-              {result.skippedStopIds
-                .map(
-                  (id) =>
-                    deliveries.find((item) => item.id === id)?.customer ?? id,
-                )
-                .join(", ")}
-              . Zmień dane przed rozpoczęciem.
+              Nie udało się zaplanować: {optimizeWarning.skippedCustomers.join(", ")}.
+              Zmień dane przed rozpoczęciem.
             </p>
           )}
-          {currentStop && !routeDirty && result.skippedStopIds.length === 0 && (
+          {currentStop && !routeDirty && !optimizeWarning?.skippedCustomers.length && (
             <section className={styles.currentStop}>
               <span>NAJBLIŻSZA DOSTAWA</span>
               <h2>{currentStop.customer}</h2>
@@ -643,8 +725,9 @@ export default function DeliveryPlanner() {
               <CheckCircle2 size={30} />
               <h2>Trasa zakończona</h2>
               <p>
-                Wydano {completedIds.length} z {ordered.length} samochodów.
-                Nieudane dostawy: {failedIds.length}.
+                Wydano {ordered.filter((item) => item.status === "delivered").length} z{" "}
+                {ordered.length} samochodów. Nieudane dostawy:{" "}
+                {ordered.filter((item) => item.status === "failed").length}.
               </p>
             </section>
           )}
@@ -657,12 +740,12 @@ export default function DeliveryPlanner() {
               </div>
             </div>
             {ordered.map((delivery, index) => {
-              const completed = completedIds.includes(delivery.id);
-              const failed = failedIds.includes(delivery.id);
-              const active = currentStop?.id === delivery.id;
+              const completed = delivery.status === "delivered";
+              const failed = delivery.status === "failed";
+              const active = currentStop?.stopId === delivery.stopId;
               return (
                 <article
-                  key={delivery.id}
+                  key={delivery.stopId}
                   className={`${completed ? styles.completedStop : ""} ${failed ? styles.failedStop : ""} ${active ? styles.activeStop : ""}`}
                 >
                   <span className={styles.stopNo}>
@@ -716,22 +799,15 @@ export default function DeliveryPlanner() {
             </div>
           </section>
           <div className={styles.actions}>
-            <button
-              onClick={() => {
-                setResult(null);
-                setCompletedIds([]);
-                setFailedIds([]);
-                localStorage.removeItem(routeDraftKey);
-              }}
-            >
-              Zmień dostawy
+            <button onClick={changeDeliveries} disabled={changingDeliveries}>
+              {changingDeliveries ? "Zapisuję…" : "Zmień dostawy"}
             </button>
             {routeDirty ? (
               <button className={styles.recalculate} onClick={optimize}>
                 <Sparkles size={18} />
                 Przelicz trasę
               </button>
-            ) : result.skippedStopIds.length > 0 ? (
+            ) : optimizeWarning?.skippedCustomers.length ? (
               <button disabled>Popraw plan</button>
             ) : currentStop ? (
               // No target="_blank" here on purpose: the app runs installed as a
@@ -795,17 +871,17 @@ export default function DeliveryPlanner() {
                         ? styles.confirmSuccess
                         : styles.confirmFailure
                     }
+                    disabled={stopActionLoading}
                     onClick={confirmStopAction}
                   >
-                    {pendingAction === "complete"
-                      ? "Potwierdź wydanie"
-                      : "Zapisz nieudaną dostawę"}
+                    {stopActionLoading
+                      ? "Zapisuję…"
+                      : pendingAction === "complete"
+                        ? "Potwierdź wydanie"
+                        : "Zapisz nieudaną dostawę"}
                   </button>
                 </div>
-                <small>
-                  Postęp zostanie zachowany na tym telefonie. Zapis centralny
-                  uruchomi się po podłączeniu Supabase.
-                </small>
+                <small>Zapis trafia od razu do bazy — widoczny dla całego zespołu.</small>
               </section>
             </div>
           )}

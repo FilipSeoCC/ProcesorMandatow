@@ -286,3 +286,63 @@ on conflict(id) do update set public=false,file_size_limit=excluded.file_size_li
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('bug-reports','bug-reports',false,8388608,array['image/png','image/jpeg','image/webp','image/gif'])
 on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
+
+-- Wires up delivery_orders/route_plans/route_stops (already created above with
+-- full RLS) to the route planner UI, which previously only kept this in
+-- localStorage. delivered_at marks a delivery order as done so it drops out
+-- of the "still needs planning" pool; failed ones stay in the pool since
+-- they're retryable.
+alter table public.delivery_orders add column if not exists delivered_at timestamptz;
+
+-- Reorders route_stops for one plan in a single call instead of N sequential
+-- PATCHes from the client, which would transiently violate
+-- unique(route_plan_id, position) on any swap (e.g. moving stop A from
+-- position 1 to 2 while stop B still holds 2). Stops are moved through a
+-- large temporary offset first — position has check(position>0), so negative
+-- temp values aren't an option — then set to their final 1..N order; the
+-- offset range is far above any realistic route length so it can never
+-- collide with another stop's real or temp position mid-update.
+create or replace function public.reorder_route_stops(
+  p_route_plan_id uuid,
+  p_organization_id uuid,
+  p_stop_ids uuid[]
+) returns void language plpgsql security definer set search_path=public as $$
+declare
+  plan_stop_count integer;
+  matched_count integer;
+  stop_id uuid;
+  idx integer;
+begin
+  if not exists (
+    select 1 from public.route_plans
+    where id = p_route_plan_id and organization_id = p_organization_id
+  ) then
+    raise exception 'ROUTE_PLAN_NOT_FOUND';
+  end if;
+
+  select count(*) into plan_stop_count from public.route_stops
+  where route_plan_id = p_route_plan_id and organization_id = p_organization_id;
+  select count(*) into matched_count from public.route_stops
+  where route_plan_id = p_route_plan_id and organization_id = p_organization_id
+    and id = any(p_stop_ids);
+  if p_stop_ids is null or array_length(p_stop_ids,1) is distinct from plan_stop_count
+     or matched_count is distinct from plan_stop_count then
+    raise exception 'STOP_SET_MISMATCH';
+  end if;
+
+  idx := 1;
+  foreach stop_id in array p_stop_ids loop
+    update public.route_stops set position = 100000 + idx
+    where id = stop_id and route_plan_id = p_route_plan_id;
+    idx := idx + 1;
+  end loop;
+
+  idx := 1;
+  foreach stop_id in array p_stop_ids loop
+    update public.route_stops set position = idx
+    where id = stop_id and route_plan_id = p_route_plan_id;
+    idx := idx + 1;
+  end loop;
+end $$;
+revoke all on function public.reorder_route_stops(uuid,uuid,uuid[]) from public;
+grant execute on function public.reorder_route_stops(uuid,uuid,uuid[]) to service_role;
