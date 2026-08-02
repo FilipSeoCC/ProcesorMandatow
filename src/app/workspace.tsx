@@ -1449,10 +1449,10 @@ export default function MandatyWorkspace() {
           <section className={styles.bugList} aria-label="Zespół">
             <p className={styles.uploadHint}>
               Nowe konta rejestrują się samodzielnie i domyślnie dostają rolę
-              „user" — bez dostępu do zatwierdzania spraw ani do tego
-              widoku. Zmień rolę poniżej, żeby dać komuś uprawnienia „boss"
-              (może zatwierdzać sprawy) albo „admin" (pełny dostęp, w tym ten
-              ekran).
+              &bdquo;user&rdquo; — bez dostępu do zatwierdzania spraw ani do
+              tego widoku. Zmień rolę poniżej, żeby dać komuś uprawnienia
+              &bdquo;boss&rdquo; (może zatwierdzać sprawy) albo
+              &bdquo;admin&rdquo; (pełny dostęp, w tym ten ekran).
             </p>
             {teamError && <p className={styles.uploadError}>{teamError}</p>}
             {team.length === 0 ? (
