@@ -108,3 +108,19 @@ Filip asked for a single file another LLM can read to know what we fixed, what e
 It covers the domain (rental vans + customer trailers crossing 3.5 t → e-TOLL penalty lands on the owner), the architecture, what works, the six things that are broken or unfinished (no invite flow, no tests, unmeasured OCR accuracy, route planner not persisted, missing CRON_SECRET/RESEND keys, schema applied by hand), and a "traps" section covering the assignment-history exclusion constraint, plate normalization, composite FKs, the partial-PATCH semantics and the swallow-the-real-error pattern that made two production failures undiagnosable.
 
 If you change any of those invariants, update that file — it is now the entry point, so a stale statement there is worse than no statement.
+
+## 2026-08-02 — Claude — Simplified roles to admin/boss/user + Zespol UI, updated README/stan-projektu.md
+
+Filip's explicit decision, executed directly (not a proposal — he gave exact accounts and mapping):
+
+- Roles collapsed from 6 to 3: `admin` (full access, incl. team/role management), `boss` (everything `user` can do plus confirming case data), `user` (day-to-day case/fleet/route work, cannot confirm). Old roles (`dispatcher`/`office`/`scanner`/`viewer`) stay in the DB enum only for backward compat — `schema.sql` now runs `update organization_members set role='user' where role in (...)` — never reintroduce them in an RLS policy or `verifyMember()` call.
+- `bootstrap_organization` no longer raises on a second signup — every self-registered account joins as `user`. `ALLOW_PUBLIC_SIGNUP` defaulted to `true` in `.env.example` to match. This is a deliberate simplicity-over-invite-flow tradeoff Filip made, not something to "fix" back to blocking without asking him.
+- The one sensitive action — confirming a case (`PATCH /api/documents/[id]`) — is now `admin`+`boss` only. Every other endpoint that used to check `admin`+`office` (or `+scanner`/`+dispatcher`) now checks `admin`+`boss`+`user` — functionally everyone does the same work except confirming.
+- New `PATCH /api/team` (admin-only): change a member's role. Guards against demoting the last admin. New "Zespol" nav item/screen in `workspace.tsx` (admin-only) with a role `<select>` per member.
+- Caught my own mistake before committing: a regex-based bulk edit to `schema.sql` briefly widened `organizations_admin`/`members_admin` RLS policies to `admin,boss,user` — those two **must** stay `admin`-only (org settings, role management itself). Fixed before push; worth double-checking if you touch those policies again.
+- Also simplified two data-visibility branches (`documents/route.ts`, `fleet/vehicles/route.ts`) that used to hide OCR text / customer contact details from `scanner`/`viewer` accounts — with only 3 roles now, every member does full case work, so those branches were dead logic gating on roles that no longer get assigned.
+- Updated `README.md` (was still describing the original no-backend PoC — completely stale) and `docs/stan-projektu.md` (blocker #1 marked resolved, role model section rewritten).
+
+**Still needed for this to actually take effect on the live DB**: run the updated `supabase/schema.sql` in the Supabase SQL Editor (enum additions + the role migration UPDATE + RLS policy changes). Until that runs, the app code expects roles that don't exist yet in the live enum.
+
+**Not done yet, flagged by Filip as a related but separate ask**: verify OCR extraction quality on the documents already uploaded in the live app (several exist) — needs Filip to paste raw OCR text + current field values per document, since I can't log in myself. Also asked for a code review pass and doc updates elsewhere in the repo — docs done; the code review was this entry's self-check plus the earlier tsc/lint pass, nothing further surfaced.
