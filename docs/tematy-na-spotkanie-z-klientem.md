@@ -85,6 +85,30 @@ Aplikacja generuje PDF-y wezwań i pism do organu. Potrzebne:
 - Wzór/treść, jakiej dotąd używali ręcznie — do porównania z tym, co generuje
   system.
 
+### Struktura pracowników i ich adresy mailowe — do nadania ról i uprawnień
+
+Rejestracja w aplikacji jest samoobsługowa (każdy zakłada konto sam), ale
+**dostęp trzeba nadać ręcznie** — nowe konto czeka na zatwierdzenie przez
+admina/boss, który wybiera mu rolę (`admin` / `boss` / `user`) na ekranie
+Pracownicy. Żeby to zrobić świadomie, a nie na wyczucie, potrzebujemy od
+klienta:
+- **Listy osób, które mają korzystać z aplikacji**, z adresami e-mail, na
+  które się zarejestrują (to jest jedyny sposób rozpoznania konta — brak
+  jeszcze mechanizmu zaproszeń po imieniu i nazwisku, patrz niżej).
+- **Dla każdej osoby: jaką rolę powinna mieć** — `admin` (pełny dostęp,
+  zarządzanie kontami), `boss` (jak `user`, plus zatwierdzanie spraw i
+  zatwierdzanie nowych kont), `user` (codzienna obsługa spraw/floty/tras).
+- Jeśli chcą **oddziały/dyspozytornię** (już wdrożone MVP, dostęp
+  admin/boss) — kto z listy powinien mieć do tego dostęp, czyli kto realnie
+  potrzebuje roli `boss`, a nie tylko `user`.
+
+Przy okazji zanotować: rejestracja dziś nie zbiera imienia/nazwiska w sposób
+gwarantowany dla wszystkich (starsze konta zakładane ręcznie mogły tego nie
+mieć) — jeśli klient chce, żeby filtry i lista pracowników zawsze pokazywały
+prawdziwe imię i nazwisko, a nie e-mail, warto to ustalić jako wymóg przy
+zakładaniu kont (to już częściowo zrobione w kodzie — patrz osobne zadanie
+w kolejce).
+
 ---
 
 ## Priorytet 3 — nie blokuje niczego teraz, ale warto zasygnalizować
