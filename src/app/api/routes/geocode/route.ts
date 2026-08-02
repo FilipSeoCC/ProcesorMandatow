@@ -4,7 +4,7 @@ import { verifyMember } from "@/lib/supabase-auth";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const member = await verifyMember(request, ["admin", "dispatcher"]);
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
 

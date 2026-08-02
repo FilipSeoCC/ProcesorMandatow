@@ -4,8 +4,8 @@ import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export const runtime = "nodejs";
 
-const readRoles = ["admin", "dispatcher", "office", "scanner", "viewer"] as const;
-const writeRoles = ["admin", "dispatcher", "office"] as const;
+const readRoles = ["admin", "boss", "user"] as const;
+const writeRoles = ["admin", "boss", "user"] as const;
 
 const validStatuses = new Set(["Dostępny", "W trasie", "Urlop", "Nieaktywny"]);
 

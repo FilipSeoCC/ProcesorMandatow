@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
-import { getSupabaseServerEnv } from "@/lib/supabase-env";
+import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+import { writeAuditEvent } from "@/lib/audit";
 
 export const runtime = "nodejs";
+
+const ASSIGNABLE_ROLES = new Set(["admin", "boss", "user"]);
 
 export async function GET(request: Request) {
   // This route exposes employee names and e-mail addresses. It is not needed
@@ -60,4 +63,69 @@ export async function GET(request: Request) {
   );
 
   return NextResponse.json({ team });
+}
+
+export async function PATCH(request: Request) {
+  const member = await verifyMember(request, ["admin"]);
+  if (!member)
+    return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
+  const body = (await request.json().catch(() => null)) as {
+    userId?: string;
+    role?: string;
+  } | null;
+  const targetUserId = typeof body?.userId === "string" ? body.userId : "";
+  const role = typeof body?.role === "string" ? body.role : "";
+  if (!targetUserId || !ASSIGNABLE_ROLES.has(role))
+    return NextResponse.json(
+      { error: "Podaj użytkownika i jedną z ról: admin, boss, user." },
+      { status: 422 },
+    );
+
+  const { url, secretKey } = getSupabaseServerEnv();
+  if (!url || !secretKey)
+    return NextResponse.json(
+      { error: "Supabase nie jest skonfigurowany." },
+      { status: 503 },
+    );
+  const headers = adminHeaders(secretKey);
+
+  // Refuse to demote the last admin — otherwise a lone admin could lock
+  // everyone (including themselves) out of role management permanently.
+  if (targetUserId === member.userId && role !== "admin") {
+    const adminsResponse = await fetch(
+      `${url}/rest/v1/organization_members?select=user_id&organization_id=eq.${member.organizationId}&role=eq.admin`,
+      { headers, cache: "no-store" },
+    );
+    const admins = adminsResponse.ok
+      ? ((await adminsResponse.json()) as Array<{ user_id: string }>)
+      : [];
+    if (admins.length <= 1)
+      return NextResponse.json(
+        { error: "Nie możesz odebrać sobie roli administratora jako jedynemu adminowi." },
+        { status: 422 },
+      );
+  }
+
+  const response = await fetch(
+    `${url}/rest/v1/organization_members?organization_id=eq.${member.organizationId}&user_id=eq.${encodeURIComponent(targetUserId)}`,
+    {
+      method: "PATCH",
+      headers: { ...headers, "Content-Type": "application/json", Prefer: "return=minimal" },
+      body: JSON.stringify({ role }),
+    },
+  );
+  if (!response.ok)
+    return NextResponse.json(
+      { error: "Nie udało się zmienić roli." },
+      { status: 502 },
+    );
+  await writeAuditEvent({
+    organizationId: member.organizationId,
+    userId: member.userId,
+    action: "member_role_changed",
+    entityType: "organization_member",
+    entityId: targetUserId,
+    details: { role },
+  });
+  return NextResponse.json({ ok: true });
 }

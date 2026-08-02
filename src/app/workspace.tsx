@@ -270,7 +270,7 @@ const bugStatusClass: Record<"nowe" | "w_trakcie" | "rozwiazane", string> = {
 
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<
-    "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs"
+    "cases" | "fleet" | "documents" | "routes" | "employees" | "team" | "bugs"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -340,6 +340,8 @@ export default function MandatyWorkspace() {
   const [team, setTeam] = useState<
     Array<{ userId: string; role: string; email: string | null; name: string | null }>
   >([]);
+  const [teamUpdating, setTeamUpdating] = useState<string | null>(null);
+  const [teamError, setTeamError] = useState<string | null>(null);
   const [docEmployeeFilter, setDocEmployeeFilter] = useState("Wszyscy");
   const [docDateFrom, setDocDateFrom] = useState("");
   const [docDateTo, setDocDateTo] = useState("");
@@ -442,6 +444,32 @@ export default function MandatyWorkspace() {
     if (!userId) return "Nieznany";
     const member = team.find((entry) => entry.userId === userId);
     return member?.name || member?.email || "Nieznany";
+  }
+
+  async function loadTeam() {
+    const response = await fetch("/api/team", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => null);
+    if (data?.team) setTeam(data.team);
+  }
+
+  async function changeTeamRole(userId: string, role: "admin" | "boss" | "user") {
+    setTeamUpdating(userId);
+    setTeamError(null);
+    try {
+      const response = await fetch("/api/team", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, role }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Nie udało się zmienić roli.");
+      await loadTeam();
+    } catch (reason) {
+      setTeamError(reason instanceof Error ? reason.message : "Nie udało się zmienić roli.");
+    } finally {
+      setTeamUpdating(null);
+    }
   }
 
   async function loadBugReports() {
@@ -618,12 +646,7 @@ export default function MandatyWorkspace() {
           });
       })
       .catch(() => null);
-    fetch("/api/team", { cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data) => {
-        if (data?.team) setTeam(data.team);
-      })
-      .catch(() => null);
+    loadTeam().catch(() => null);
   }, []);
 
   async function changePassword() {
@@ -1257,6 +1280,19 @@ export default function MandatyWorkspace() {
             <button
               type="button"
               onClick={() => {
+                setActiveView("team");
+                setMobileMenu(false);
+              }}
+              className={`${styles.navItem} ${activeView === "team" ? styles.navActive : ""}`}
+            >
+              <UsersRound size={19} />
+              Zespół
+            </button>
+          )}
+          {account?.role === "admin" && (
+            <button
+              type="button"
+              onClick={() => {
                 setActiveView("bugs");
                 setMobileMenu(false);
               }}
@@ -1357,9 +1393,11 @@ export default function MandatyWorkspace() {
                     ? "Planer tras"
                     : activeView === "employees"
                       ? "Pracownicy"
-                      : activeView === "bugs"
-                        ? "Zgłoszenia błędów"
-                        : "Zarządzanie flotą"}
+                      : activeView === "team"
+                        ? "Zespół"
+                        : activeView === "bugs"
+                          ? "Zgłoszenia błędów"
+                          : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
@@ -1385,6 +1423,7 @@ export default function MandatyWorkspace() {
               </button>
             ) : activeView === "routes" ||
               activeView === "employees" ||
+              activeView === "team" ||
               activeView === "bugs" ? null : (
               <button
                 className={styles.primaryButton}
@@ -1406,6 +1445,50 @@ export default function MandatyWorkspace() {
           <Employees />
         ) : activeView === "routes" ? (
           <DeliveryPlanner />
+        ) : activeView === "team" ? (
+          <section className={styles.bugList} aria-label="Zespół">
+            <p className={styles.uploadHint}>
+              Nowe konta rejestrują się samodzielnie i domyślnie dostają rolę
+              „user" — bez dostępu do zatwierdzania spraw ani do tego
+              widoku. Zmień rolę poniżej, żeby dać komuś uprawnienia „boss"
+              (może zatwierdzać sprawy) albo „admin" (pełny dostęp, w tym ten
+              ekran).
+            </p>
+            {teamError && <p className={styles.uploadError}>{teamError}</p>}
+            {team.length === 0 ? (
+              <div className={styles.emptyState}>
+                <UsersRound size={24} />
+                <strong>Brak kont w zespole</strong>
+              </div>
+            ) : (
+              team.map((member) => (
+                <article key={member.userId} className={styles.bugCard}>
+                  <div>
+                    <strong>{member.name || member.email || member.userId}</strong>
+                    {member.name && member.email && <p>{member.email}</p>}
+                  </div>
+                  <label className={styles.selectBox}>
+                    <span className={styles.srOnly}>Rola</span>
+                    <select
+                      value={member.role}
+                      disabled={teamUpdating === member.userId}
+                      onChange={(event) =>
+                        changeTeamRole(
+                          member.userId,
+                          event.target.value as "admin" | "boss" | "user",
+                        )
+                      }
+                    >
+                      <option value="user">User (pracownik)</option>
+                      <option value="boss">Boss (kierownik/szef)</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                    <ChevronDown size={16} />
+                  </label>
+                </article>
+              ))
+            )}
+          </section>
         ) : activeView === "bugs" ? (
           <section className={styles.bugList} aria-label="Zgłoszenia błędów">
             {bugReportsLoading && bugReports.length === 0 ? (
@@ -2048,6 +2131,7 @@ export default function MandatyWorkspace() {
         </button>
       ) : activeView === "routes" ||
         activeView === "employees" ||
+        activeView === "team" ||
         activeView === "bugs" ? null : (
         <button
           className={styles.mobileScanButton}

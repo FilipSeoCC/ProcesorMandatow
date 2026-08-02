@@ -21,7 +21,9 @@ export async function PATCH(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const member = await verifyMember(request, ["admin", "office"]);
+  // Confirming is the sensitive step (Filip's requirement): a plain 'user'
+  // can prepare/match a case but only 'boss'/'admin' can sign off on it.
+  const member = await verifyMember(request, ["admin", "boss"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const body = await request.json().catch(() => null);
@@ -135,7 +137,7 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const member = await verifyMember(request, ["admin", "office"]);
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();

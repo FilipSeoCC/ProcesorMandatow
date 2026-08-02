@@ -4,7 +4,7 @@ import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export const runtime = "nodejs";
 
-const allRoles = ["admin", "dispatcher", "office", "scanner", "viewer"] as const;
+const allRoles = ["admin", "boss", "user"] as const;
 
 export async function GET(request: Request) {
   const member = await verifyMember(request, ["admin"]);

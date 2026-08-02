@@ -4,7 +4,7 @@ import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export const runtime = "nodejs";
 
-const writeRoles = ["admin", "dispatcher", "office"] as const;
+const writeRoles = ["admin", "boss", "user"] as const;
 
 export async function DELETE(
   request: Request,
