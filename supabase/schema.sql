@@ -346,3 +346,34 @@ begin
 end $$;
 revoke all on function public.reorder_route_stops(uuid,uuid,uuid[]) from public;
 grant execute on function public.reorder_route_stops(uuid,uuid,uuid[]) to service_role;
+
+-- MVP for "dyspozytornia": branches (oddziały) + which one currently has each
+-- vehicle. Whole feature is admin/boss only per Filip's ask — deliberately
+-- not exposed to 'user', unlike the rest of fleet management.
+create table if not exists public.branches (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null, address text not null, phone text not null default '', hours text not null default '',
+  created_at timestamptz not null default now(), unique(organization_id,id)
+);
+alter table public.branches enable row level security;
+drop policy if exists branches_read on public.branches; drop policy if exists branches_write on public.branches;
+create policy branches_read on public.branches for select using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
+create policy branches_write on public.branches for all using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
+
+alter table public.vehicles add column if not exists branch_id uuid references public.branches(id) on delete set null;
+
+-- History of relocations, not just current state — "mogą się przydać w
+-- przyszłości" per Filip. Both branch references set-null on delete rather
+-- than restrict/cascade, so removing a branch later doesn't destroy history
+-- or block deletion.
+create table if not exists public.vehicle_relocations (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  vehicle_id uuid not null, from_branch_id uuid references public.branches(id) on delete set null,
+  to_branch_id uuid references public.branches(id) on delete set null,
+  relocated_by uuid references auth.users(id) on delete set null, relocated_at timestamptz not null default now(),
+  foreign key(organization_id,vehicle_id) references public.vehicles(organization_id,id) on delete cascade
+);
+alter table public.vehicle_relocations enable row level security;
+drop policy if exists relocations_read on public.vehicle_relocations; drop policy if exists relocations_insert on public.vehicle_relocations;
+create policy relocations_read on public.vehicle_relocations for select using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
+create policy relocations_insert on public.vehicle_relocations for insert with check(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]) and relocated_by=auth.uid());
