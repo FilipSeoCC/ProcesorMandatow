@@ -734,7 +734,13 @@ export default function DeliveryPlanner() {
             ) : result.skippedStopIds.length > 0 ? (
               <button disabled>Popraw plan</button>
             ) : currentStop ? (
-              <a href={navigationUrl} target="_blank" rel="noopener noreferrer">
+              // No target="_blank" here on purpose: the app runs installed as a
+              // standalone PWA (manifest.ts) and WebKit's standalone mode has no
+              // "new tab" to open into, so target="_blank" links silently do
+              // nothing on iOS — this is what made "Nawiguj" look unresponsive.
+              // Navigating in the same context lets the OS hand off to the
+              // native Maps app instead, which is the actual desired behavior.
+              <a href={navigationUrl} rel="noreferrer">
                 <Navigation size={19} />
                 {navigationLabel}
                 <ExternalLink size={15} />
