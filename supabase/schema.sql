@@ -6,8 +6,18 @@ create extension if not exists btree_gist;
 -- runs — never assign them to a new member, and don't add them back to any
 -- RLS policy or endpoint check.
 do $$ begin create type public.app_role as enum ('admin','boss','user','dispatcher','office','scanner','viewer'); exception when duplicate_object then null; end $$;
-do $$ begin alter type public.app_role add value if not exists 'boss'; exception when others then null; end $$;
-do $$ begin alter type public.app_role add value if not exists 'user'; exception when others then null; end $$;
+
+-- IMPORTANT — read before running this file on an existing database:
+-- "ALTER TYPE ... ADD VALUE" cannot execute inside a transaction block, and
+-- Supabase's SQL Editor runs a whole pasted script as one transaction (or a
+-- DO block, which is a transaction block too — wrapping it in DO+exception
+-- like above just hides the failure instead of preventing it). If the
+-- app_role type in this database predates 'boss'/'user', run ONLY these two
+-- lines below first, as their own separate execution, THEN run the rest of
+-- this file. On a brand-new database `create type` above already includes
+-- both values, so these two are no-ops there — safe to leave in either way.
+alter type public.app_role add value if not exists 'boss';
+alter type public.app_role add value if not exists 'user';
 
 create table if not exists public.organizations (
   id uuid primary key default gen_random_uuid(), name text not null,
