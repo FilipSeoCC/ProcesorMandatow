@@ -46,6 +46,8 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 | `src/lib/vehicle-match.ts` | **Serce aplikacji** — rejestracja + data → pojazd → przypisanie → klient |
 | `src/lib/ocr-queue.ts` | Kolejka ponawiania OCR, obrabia partię na wywołanie |
 | `src/app/workspace.tsx` | Prawie całe UI zalogowanej aplikacji (~2600 linii) |
+| `src/app/employees.tsx` | Widok **Pracownicy** — kierowcy (wszyscy) + tabela kont/ról (admin/boss) |
+| `src/lib/account-emails.ts` | Szablony dwóch maili rejestracyjnych (Resend) |
 | `supabase/schema.sql` | Schemat; **wymaga ręcznego uruchomienia w Supabase** |
 
 ---
@@ -61,7 +63,10 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 - Flota i pracownicy — realny zapis do bazy, edycja, import CSV/XML floty.
 - Generowanie wezwania PDF, pakietu do pracownika i pisma do urzędu.
 - Log audytowy, zgłaszanie błędów ze zrzutem ekranu, panel administracyjny.
-- Otwarta rejestracja, zarządzanie rolami z UI (Zespół, admin-only) — 3 role: `admin`/`boss`/`user`.
+- Otwarta rejestracja (bez zaproszenia) z bramką zatwierdzania — nowe konto nie
+  loguje się, dopóki admin/boss nie nada mu roli. Zarządzanie kontami/rolami
+  scalone z widokiem **Pracownicy** (tabela kont, widoczna dla admin/boss;
+  kierowcy widoczni dla wszystkich) — 3 role: `admin`/`boss`/`user`.
 - Planer tras oparty o Google Route Optimization.
 - Pełna aplikacja na telefonie — te same funkcje co na desktopie.
 
@@ -120,7 +125,12 @@ produktu opiera się na tym, że człowiek nie przepisuje danych ręcznie.
 interfejsie jest to nawet napisane wprost. Albo podpiąć do bazy, albo ukryć —
 zostawienie tak wprowadza użytkownika w błąd.
 
-### 5. Brak konfiguracji na produkcji
+Ręczna zmiana kolejności przystanków (strzałki góra/dół) działa poprawnie —
+sprawdzone i potwierdzone 2026-08-02. Przycisk "Nawiguj" wcześniej wyglądał na
+zepsuty z innego powodu: `target="_blank"` na linku do Google Maps nic nie
+robi w trybie `standalone` PWA (`manifest.ts`) na iOS — usunięte.
+
+### 5. Brakuje `RESEND_API_KEY` na produkcji
 
 Sprawdzasz jednym żądaniem, bez logowania:
 
@@ -128,12 +138,18 @@ Sprawdzasz jednym żądaniem, bez logowania:
 curl -s https://procesor-mandatow.vercel.app/api/health
 ```
 
-Stan na 2026-08-02:
+Stan na 2026-08-02 (po dodaniu `CRON_SECRET` — `ocrQueueConfigured` jest już
+`true`, kolejka OCR i auto-dopasowanie działają):
 
-- `ocrQueueConfigured: false` — brak `CRON_SECRET`. **Kolejka ponawiania OCR i
-  auto-dopasowanie nie działają w ogóle**, oba endpointy zwracają 401.
-- `emailConfigured: false` — brak `RESEND_API_KEY`, więc wysyłka pakietu
-  mailem zwraca 503.
+- `emailConfigured: false` — brak `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
+  Wysyłka pakietu do pracownika (`review-package`) zwraca 503, a oba nowe
+  maile rejestracyjne (`src/lib/account-emails.ts` — "dziękujemy za
+  rejestrację" i "przyznano dostęp") po prostu **nie wysyłają się w ogóle i
+  nie zgłaszają błędu** (funkcje `sendRegistrationReceivedEmail`/
+  `sendRoleGrantedEmail` cicho wracają, gdy brakuje kluczy) — reszta flow
+  (blokada logowania, nadanie roli) działa niezależnie od tego. Trzeba
+  ustawić te dwie zmienne w Vercelu, żeby którakolwiek wysyłka mailem
+  faktycznie zadziałała.
 
 ### 6. Schemat bazy trzeba wgrywać ręcznie
 
@@ -189,10 +205,11 @@ skasowania tej zmiennej i unieruchomienia planera.
 Kolejność, którą uważam za właściwą:
 
 1. ~~Zapraszanie użytkowników i zarządzanie rolami~~ — zrobione 2026-08-02 (patrz wyżej).
-2. **`CRON_SECRET` w Vercelu** — jedna zmienna odblokowuje dwie działające już funkcje.
-3. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
-4. **Testy `extractMandateFields`**.
-5. **Planer tras** — podpiąć do bazy albo ukryć.
+2. ~~`CRON_SECRET` w Vercelu~~ — ustawione 2026-08-02, kolejka OCR i auto-dopasowanie działają.
+3. **`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu** — bez tego żadna wysyłka mailem (pakiet do pracownika, dwa maile rejestracyjne) nie działa.
+4. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
+5. **Testy `extractMandateFields`**.
+6. **Planer tras** — podpiąć do bazy albo ukryć.
 
 Dalsze plany produktowe (lista automatyzacji od klienta: windykacja, rozliczenie
 zwrotu, serwisy, dyspozytornia, karty paliwowe, refaktura mandatów i e-TOLL,
