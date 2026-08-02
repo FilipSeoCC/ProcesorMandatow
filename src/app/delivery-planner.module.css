@@ -6,6 +6,11 @@
   background: #f4f7fb;
   color: #172033;
 }
+/* Only the route view renders the fixed .actions bar, so only it needs the
+   clearance — otherwise the last row ("Powrót na plac") sits behind it. */
+.plannerWithActions {
+  padding-bottom: calc(90px + env(safe-area-inset-bottom));
+}
 .hero {
   padding: 4px 2px 18px;
 }
@@ -514,6 +519,15 @@
   .actions a {
     font-size: 12px;
   }
+  /* No sidebar on mobile, but there is a bottom nav to clear. */
+  .actions {
+    left: 0;
+    bottom: calc(61px + env(safe-area-inset-bottom));
+    padding-bottom: 10px;
+  }
+  .plannerWithActions {
+    padding-bottom: calc(151px + env(safe-area-inset-bottom));
+  }
   .error,
   .warning {
     font-size: 12px;
@@ -522,13 +536,17 @@
 .moveButtons button:disabled {
   opacity: 0.25;
 }
+/* Fixed bar, so the driver can act without scrolling back. Two consequences
+   have to be handled explicitly: it must not run underneath the desktop
+   sidebar (left offset below), and .planner has to reserve height for it so
+   the last route row is not hidden behind it. */
 .actions {
   position: fixed;
   z-index: 11;
-  left: 0;
+  left: 248px;
   right: 0;
-  bottom: calc(61px + env(safe-area-inset-bottom));
-  padding: 10px 16px;
+  bottom: 0;
+  padding: 10px 16px max(10px, env(safe-area-inset-bottom));
   background: #fff;
   border-top: 1px solid #e1e7ef;
   display: grid;
@@ -567,13 +585,6 @@
   background: #2563eb;
   color: #fff;
   border-color: #2563eb;
-}
-/* Secondary to "Nawiguj do klienta": opening the whole route is the planning
-   view, navigating to the next stop is the one the driver taps repeatedly. */
-.actions a.wholeRoute {
-  background: #eef4ff;
-  color: #1d4ed8;
-  border: 1px solid #b9cdf7;
 }
 .currentStop {
   margin-top: 14px;
