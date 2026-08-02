@@ -13,6 +13,17 @@ export async function GET() {
         process.env.GOOGLE_WIF_AUDIENCE,
     ),
     ocrQueueConfigured: Boolean(process.env.CRON_SECRET),
+    // Route planning needs both: geocoding is API-key based (classic Maps
+    // Geocoding API), optimization is WIF based. Losing either one breaks the
+    // planner, and it used to fail silently in production with this endpoint
+    // still reporting "ok".
+    geocodeConfigured: Boolean(process.env.GOOGLE_MAPS_SERVER_API_KEY),
+    routeOptimizationConfigured: Boolean(
+      process.env.GOOGLE_WIF_AUDIENCE && process.env.GOOGLE_CLOUD_PROJECT_ID,
+    ),
+    emailConfigured: Boolean(
+      process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL,
+    ),
   };
 
   if (url && secretKey) {
@@ -26,8 +37,12 @@ export async function GET() {
     } catch {}
   }
 
+  // The flags were previously computed and then dropped from the response, so
+  // a missing key looked identical to a healthy deploy. They are booleans, never
+  // values — nothing here reveals a secret. HTTP status still tracks Supabase
+  // only, so the uptime monitor keeps its documented meaning.
   return NextResponse.json(
-    { status: checks.supabase ? "ok" : "degraded" },
+    { status: checks.supabase ? "ok" : "degraded", checks },
     { status: checks.supabase ? 200 : 503, headers: { "Cache-Control": "no-store" } },
   );
 }

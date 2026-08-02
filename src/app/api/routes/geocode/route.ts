@@ -19,7 +19,10 @@ export async function POST(request: Request) {
   const apiKey = process.env.GOOGLE_MAPS_SERVER_API_KEY;
   if (!apiKey)
     return NextResponse.json(
-      { error: "Geokodowanie nie jest skonfigurowane." },
+      {
+        error:
+          "Wyszukiwanie adresów nie jest skonfigurowane — brakuje klucza Google Maps (GOOGLE_MAPS_SERVER_API_KEY). Zgłoś to administratorowi; planer tras nie zadziała bez niego.",
+      },
       { status: 503 },
     );
 
