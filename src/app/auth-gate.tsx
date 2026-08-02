@@ -58,11 +58,11 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     });
     const result = await response.json().catch(() => ({}));
     setSubmitting(false);
-    if (response.ok && !result.confirmationRequired) {
+    if (response.ok && !result.confirmationRequired && !result.pendingApproval) {
       setStatus("ready");
       return;
     }
-    if (result.confirmationRequired) {
+    if (result.confirmationRequired || result.pendingApproval) {
       setMessage(result.message);
       return;
     }

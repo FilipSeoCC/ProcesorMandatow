@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
-import { getSupabaseServerEnv } from "@/lib/supabase-env";
+import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 import { verifyMember } from "@/lib/supabase-auth";
 import { writeAuditEvent } from "@/lib/audit";
+import { buildRegistrationReceivedEmail } from "@/lib/account-emails";
 
 type AuthSession = {
   access_token: string;
   refresh_token: string;
   expires_in?: number;
-  user?: { email?: string };
+  user?: { id?: string; email?: string };
 };
 const allRoles = ["admin", "boss", "user"] as const;
 
@@ -28,18 +29,17 @@ function setSession(response: NextResponse, session: AuthSession) {
   });
 }
 
-async function membership(accessToken: string) {
-  const { url, publishableKey } = getSupabaseServerEnv();
-  if (!url || !publishableKey) return null;
+// RLS hides a pending member's own row from a user-token query
+// (is_org_member/has_org_role both require status='active'), so it can't
+// distinguish "pending" from "no membership at all". The login gate needs
+// that distinction with certainty, so it looks the row up with the admin
+// key instead, bypassing RLS.
+async function membershipByUserId(userId: string) {
+  const { url, secretKey } = getSupabaseServerEnv();
+  if (!url || !secretKey) return null;
   const response = await fetch(
-    `${url}/rest/v1/organization_members?select=organization_id,role&limit=1`,
-    {
-      headers: {
-        apikey: publishableKey,
-        Authorization: `Bearer ${accessToken}`,
-      },
-      cache: "no-store",
-    },
+    `${url}/rest/v1/organization_members?select=organization_id,role,status&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
+    { headers: adminHeaders(secretKey), cache: "no-store" },
   );
   if (!response.ok) return null;
   return (
@@ -47,9 +47,27 @@ async function membership(accessToken: string) {
       (await response.json()) as Array<{
         organization_id: string;
         role: string;
+        status: string;
       }>
     )[0] ?? null
   );
+}
+
+async function sendRegistrationReceivedEmail(email: string, name: string) {
+  const resendKey = process.env.RESEND_API_KEY?.trim();
+  const from = process.env.RESEND_FROM_EMAIL?.trim();
+  if (!resendKey || !from) return;
+  const mail = buildRegistrationReceivedEmail(name);
+  try {
+    await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from, to: [email], subject: mail.subject, html: mail.html, text: mail.text }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (reason) {
+    console.error("Resend registration-received email failed", reason);
+  }
 }
 
 async function bootstrap(accessToken: string) {
@@ -162,11 +180,6 @@ export async function POST(request: Request) {
   const lastName = body?.lastName?.trim() ?? "";
   const phone = body?.phone?.trim() ?? "";
   if (signingUp) {
-    if (process.env.ALLOW_PUBLIC_SIGNUP !== "true")
-      return NextResponse.json(
-        { error: "Rejestracja jest dostępna wyłącznie na zaproszenie." },
-        { status: 403 },
-      );
     if (!firstName || !lastName || !phone)
       return NextResponse.json(
         { error: "Podaj imię, nazwisko i numer telefonu." },
@@ -227,7 +240,8 @@ export async function POST(request: Request) {
       { status: 202 },
     );
 
-  let member = await membership(authData.access_token);
+  const userId = authData.user?.id;
+  let member = userId ? await membershipByUserId(userId) : null;
   if (!member) {
     const created = await bootstrap(authData.access_token);
     if (!created.ok)
@@ -239,7 +253,24 @@ export async function POST(request: Request) {
         },
         { status: 503 },
       );
-    member = await membership(authData.access_token);
+    member = userId ? await membershipByUserId(userId) : null;
+  }
+  if (member?.status === "pending") {
+    if (signingUp) {
+      await sendRegistrationReceivedEmail(email, `${firstName} ${lastName}`.trim());
+      return NextResponse.json(
+        {
+          pendingApproval: true,
+          message:
+            "Dziękujemy za rejestrację! Twoje konto czeka na zatwierdzenie przez administratora — otrzymasz e-mail, gdy uzyskasz dostęp.",
+        },
+        { status: 202 },
+      );
+    }
+    return NextResponse.json(
+      { error: "Twoje konto czeka na zatwierdzenie roli przez administratora." },
+      { status: 403 },
+    );
   }
   const response = NextResponse.json({
     authenticated: true,

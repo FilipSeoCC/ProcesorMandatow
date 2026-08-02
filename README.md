@@ -43,7 +43,6 @@ Zmienne środowiskowe (patrz `.env.example`) trzeba ustawić w Vercelu:
 - `GOOGLE_MAPS_SERVER_API_KEY` — **osobny** klucz do geokodowania adresów w planerze tras (Maps Geocoding API — inne API niż Route Optimization, nadal wymaga klucza),
 - `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `MANDATE_REVIEW_EMAIL`, `APP_URL` — wysyłka pakietu do pracownika,
 - `CRON_SECRET` — odblokowuje kolejkę ponawiania OCR i auto-dopasowania (`/api/internal/*`, harmonogram w `vercel.json`),
-- `ALLOW_PUBLIC_SIGNUP` — czy rejestracja jest otwarta (nowe konta dostają rolę `user`),
 - `ROUTE_OPTIMIZATION_DEMO_MODE` — czy planer tras ma cichym trybem demo zastępować brak konfiguracji Google (domyślnie `false` — bez konfiguracji zwraca błąd zamiast fałszywego wyniku).
 
 Sprawdź stan konfiguracji bez logowania: `curl https://procesor-mandatow.vercel.app/api/health`.
@@ -52,7 +51,7 @@ Sprawdź stan konfiguracji bez logowania: `curl https://procesor-mandatow.vercel
 
 `supabase/schema.sql` to pełny schemat — **nie jest automatycznie stosowany**, trzeba go ręcznie uruchomić w Supabase SQL Editor po każdej zmianie (wszystko jest idempotentne, `add column if not exists`/`update`). Zawiera: organizacje i członkostwa z rolami, klientów i pojazdów, historię przypisań pojazd→klient (z ograniczeniem wykluczającym nakładające się okresy), zlecenia dostawy i trasy, dokumenty mandatowe z polami finansowymi, log audytowy, RLS.
 
-Pierwsze konto zakłada organizację i zostaje adminem (`bootstrap_organization`). Kolejne rejestracje (gdy `ALLOW_PUBLIC_SIGNUP=true`) dołączają jako `user` — awans na `boss`/`admin` odbywa się w aplikacji, w widoku **Zespół** (dostępnym dla adminów).
+Pierwsze konto zakłada organizację i zostaje adminem (`bootstrap_organization`), od razu aktywnym. Rejestracja jest zawsze otwarta (bez zaproszenia), ale każde kolejne konto ląduje ze statusem `pending` i rolą `user` — nie może się zalogować, dopóki admin/boss nie nada mu roli w tabeli kont na ekranie **Pracownicy** (ta akcja jednocześnie ustawia status na `active`). Rejestrujący się dostaje od razu e-mail z potwierdzeniem, a drugi — o przyznanym dostępie — dopiero po zatwierdzeniu.
 
 ---
 
