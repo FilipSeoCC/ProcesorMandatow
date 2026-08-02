@@ -5,8 +5,8 @@ import { normalizePlate } from "@/lib/vehicle-match";
 
 export const runtime = "nodejs";
 
-const readRoles = ["admin", "dispatcher", "office", "scanner", "viewer"] as const;
-const writeRoles = ["admin", "dispatcher", "office"] as const;
+const readRoles = ["admin", "boss", "user"] as const;
+const writeRoles = ["admin", "boss", "user"] as const;
 
 type VehicleRow = {
   id: string;
@@ -75,7 +75,8 @@ export async function GET(request: Request) {
     }
   }
 
-  const mayReadCustomerContact = ["admin", "dispatcher", "office"].includes(member.role);
+  // Every role in the 3-role model does full fleet work now — no more
+  // restricted scan-only tier that should have contact details hidden.
   const result = vehicles.map((vehicle) => {
     const assignment = assignmentByVehicle.get(vehicle.id);
     const customer = assignment ? customerById.get(assignment.customer_id) : undefined;
@@ -85,8 +86,8 @@ export async function GET(request: Request) {
       model: vehicle.model,
       registration: vehicle.registration_number,
       customer: customer?.name ?? (assignment ? "" : "Flota wewnętrzna"),
-      customerEmail: mayReadCustomerContact ? customer?.email ?? "" : "",
-      customerTaxId: mayReadCustomerContact ? customer?.tax_id ?? "" : "",
+      customerEmail: customer?.email ?? "",
+      customerTaxId: customer?.tax_id ?? "",
       assignedAt: assignment?.valid_from ?? "",
     };
   });

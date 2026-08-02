@@ -38,7 +38,7 @@ export async function POST(request: Request) {
   // Authenticate before parsing multipart data. Otherwise an unauthenticated
   // caller can force the function to buffer a large request body.
   const member = supabaseUrl && serviceKey
-    ? await verifyMember(request, ["admin", "office", "scanner"])
+    ? await verifyMember(request, ["admin", "boss", "user"])
     : null;
   if (supabaseUrl && serviceKey && !member)
     return NextResponse.json({ error: "Brak uprawnień do przesyłania dokumentów." }, { status: 401 });

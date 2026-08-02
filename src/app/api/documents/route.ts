@@ -24,12 +24,7 @@ type DocumentRow = {
 };
 
 export async function GET(request: Request) {
-  const member = await verifyMember(request, [
-    "admin",
-    "office",
-    "scanner",
-    "viewer",
-  ]);
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();
@@ -38,13 +33,11 @@ export async function GET(request: Request) {
       { error: "Supabase nie jest skonfigurowany." },
       { status: 503 },
     );
-  // Scanner/viewer accounts only need a work list and preview. OCR text and
-  // customer identifiers can contain PESEL/NIP, address or other personal
-  // data, so only office/admin receive them.
-  const mayReadSensitiveData = ["admin", "office"].includes(member.role);
-  const select = mayReadSensitiveData
-    ? "id,status,created_at,uploaded_by,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,ocr_text,responsible_name,responsible_tax_id,responsible_email,confirmed_at,resolved_at,mandate_document_pages(storage_path,page_number)"
-    : "id,status,created_at,uploaded_by,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,confirmed_at,resolved_at,mandate_document_pages(storage_path,page_number)";
+  // With the 3-role model every member (admin/boss/user) does full case
+  // work, so there's no more restricted "scan only" tier that should have
+  // OCR text and customer identifiers hidden from it.
+  const select =
+    "id,status,created_at,uploaded_by,registration_number,event_at,letter_date,case_number,sender,extraction_confidence,ocr_text,responsible_name,responsible_tax_id,responsible_email,confirmed_at,resolved_at,mandate_document_pages(storage_path,page_number)";
   const response = await fetch(
     `${url}/rest/v1/mandate_documents?select=${encodeURIComponent(select)}&organization_id=eq.${member.organizationId}&order=created_at.desc&limit=50`,
     {
@@ -96,15 +89,14 @@ export async function GET(request: Request) {
         }
       }
       const authority = detectAuthorityFromOcr(
-        mayReadSensitiveData ? document.ocr_text : "",
+        document.ocr_text,
         document.sender,
       );
       return {
         ...document,
         sender: authority.name || null,
         authority_name: authority.name || null,
-        authority_address:
-          mayReadSensitiveData && authority.address ? authority.address : null,
+        authority_address: authority.address || null,
         authority_confidence: authority.confidence,
         authority_source: authority.source,
         previewUrl,

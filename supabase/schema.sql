@@ -1,7 +1,13 @@
 create extension if not exists pgcrypto;
 create extension if not exists btree_gist;
 
-do $$ begin create type public.app_role as enum ('admin','dispatcher','office','scanner','viewer'); exception when duplicate_object then null; end $$;
+-- Simplified to 3 roles (admin/boss/user); dispatcher/office/scanner/viewer
+-- stay in the enum only so old rows don't break before the UPDATE below
+-- runs — never assign them to a new member, and don't add them back to any
+-- RLS policy or endpoint check.
+do $$ begin create type public.app_role as enum ('admin','boss','user','dispatcher','office','scanner','viewer'); exception when duplicate_object then null; end $$;
+do $$ begin alter type public.app_role add value if not exists 'boss'; exception when others then null; end $$;
+do $$ begin alter type public.app_role add value if not exists 'user'; exception when others then null; end $$;
 
 create table if not exists public.organizations (
   id uuid primary key default gen_random_uuid(), name text not null,
@@ -14,7 +20,7 @@ alter table public.organizations add column if not exists postal_address text no
 create table if not exists public.organization_members (
   organization_id uuid not null references public.organizations(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
-  role public.app_role not null default 'viewer', display_name text not null default '', phone text not null default '',
+  role public.app_role not null default 'user', display_name text not null default '', phone text not null default '',
   created_at timestamptz not null default now(), primary key (organization_id,user_id)
 );
 create table if not exists public.customers (
@@ -137,17 +143,28 @@ declare created_id uuid; existing_id uuid;
 begin
   if auth.uid() is null then raise exception 'Not authenticated'; end if;
   if exists(select 1 from public.organization_members where user_id=auth.uid()) then raise exception 'User already belongs to an organization'; end if;
-  -- A second account may never join an existing fleet through a public RPC.
-  -- It must be added by the invitation flow, otherwise any person who signs
-  -- up with the public Supabase endpoint could gain office access.
+  -- Deliberately simple for now (Filip's call): signup itself is already
+  -- gated by ALLOW_PUBLIC_SIGNUP at the API layer, so anyone who reaches
+  -- this RPC has already cleared that gate. Every self-registered account
+  -- joins the existing org as the lowest-privilege working role ('user')
+  -- — same visibility as any other user. Promotion to 'admin'/'boss' is a
+  -- manual step from the Zespol (team) UI, and the sensitive "zatwierdz
+  -- dane" action is restricted to admin+boss at the API layer, not here.
   select id into existing_id from public.organizations order by created_at asc limit 1;
-  if existing_id is not null then raise exception 'Invitation required'; end if;
+  if existing_id is not null then
+    insert into public.organization_members(organization_id,user_id,role) values(existing_id,auth.uid(),'user');
+    return existing_id;
+  end if;
   insert into public.organizations(name,owner_id) values(coalesce(nullif(trim(company_name),''),'Moja firma'),auth.uid()) returning id into created_id;
   insert into public.organization_members(organization_id,user_id,role) values(created_id,auth.uid(),'admin');
   return created_id;
 end $$;
 revoke all on function public.bootstrap_organization(text) from public;
 grant execute on function public.bootstrap_organization(text) to authenticated;
+
+-- One-time migration to the simplified 3-role model. Idempotent (no-op once
+-- no rows match), safe to run every time this file is re-applied.
+update public.organization_members set role='user' where role in ('dispatcher','office','scanner','viewer');
 
 create or replace function public.claim_ocr_job() returns table(id uuid, organization_id uuid) language plpgsql security definer set search_path=public as $$
 begin
@@ -196,24 +213,24 @@ create policy organizations_admin on public.organizations for update using(publi
 create policy members_read on public.organization_members for select using(public.is_org_member(organization_id));
 create policy members_admin on public.organization_members for all using(public.has_org_role(organization_id,array['admin']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin']::public.app_role[]));
 create policy customers_read on public.customers for select using(public.is_org_member(organization_id));
-create policy customers_write on public.customers for all using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
+create policy customers_write on public.customers for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy vehicles_read on public.vehicles for select using(public.is_org_member(organization_id));
-create policy vehicles_write on public.vehicles for all using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
+create policy vehicles_write on public.vehicles for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy assignments_read on public.vehicle_assignments for select using(public.is_org_member(organization_id));
-create policy assignments_write on public.vehicle_assignments for all using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
+create policy assignments_write on public.vehicle_assignments for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy deliveries_read on public.delivery_orders for select using(public.is_org_member(organization_id));
-create policy deliveries_write on public.delivery_orders for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
+create policy deliveries_write on public.delivery_orders for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy plans_read on public.route_plans for select using(public.is_org_member(organization_id));
-create policy plans_write on public.route_plans for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
+create policy plans_write on public.route_plans for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy stops_read on public.route_stops for select using(public.is_org_member(organization_id));
-create policy stops_write on public.route_stops for all using(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher']::public.app_role[]));
-create policy documents_read on public.mandate_documents for select using(public.has_org_role(organization_id,array['admin','office','scanner','viewer']::public.app_role[]));
-create policy documents_write on public.mandate_documents for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
-create policy document_pages_read on public.mandate_document_pages for select using(public.has_org_role(organization_id,array['admin','office','scanner','viewer']::public.app_role[]));
-create policy document_pages_write on public.mandate_document_pages for all using(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','office','scanner']::public.app_role[]));
-create policy audit_read on public.audit_events for select using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
+create policy stops_write on public.route_stops for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
+create policy documents_read on public.mandate_documents for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
+create policy documents_write on public.mandate_documents for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
+create policy document_pages_read on public.mandate_document_pages for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
+create policy document_pages_write on public.mandate_document_pages for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
+create policy audit_read on public.audit_events for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());
-create policy mandate_status_events_read on public.mandate_status_events for select using(public.has_org_role(organization_id,array['admin','office']::public.app_role[]));
+create policy mandate_status_events_read on public.mandate_status_events for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 
 do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane'); exception when duplicate_object then null; end $$;
 create table if not exists public.bug_reports (
@@ -226,9 +243,9 @@ alter table public.bug_reports add column if not exists attachment_path text not
 alter table public.bug_reports add column if not exists attachment_mime_type text not null default '';
 alter table public.bug_reports enable row level security;
 drop policy if exists bug_reports_read on public.bug_reports; drop policy if exists bug_reports_insert on public.bug_reports; drop policy if exists bug_reports_update on public.bug_reports;
-create policy bug_reports_read on public.bug_reports for select using(public.has_org_role(organization_id,array['admin']::public.app_role[]));
+create policy bug_reports_read on public.bug_reports for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 create policy bug_reports_insert on public.bug_reports for insert with check(public.is_org_member(organization_id) and reporter_id=auth.uid());
-create policy bug_reports_update on public.bug_reports for update using(public.has_org_role(organization_id,array['admin']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin']::public.app_role[]));
+create policy bug_reports_update on public.bug_reports for update using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 
 create table if not exists public.drivers (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
@@ -239,7 +256,7 @@ create table if not exists public.drivers (
 alter table public.drivers enable row level security;
 drop policy if exists drivers_read on public.drivers; drop policy if exists drivers_write on public.drivers;
 create policy drivers_read on public.drivers for select using(public.is_org_member(organization_id));
-create policy drivers_write on public.drivers for all using(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','dispatcher','office']::public.app_role[]));
+create policy drivers_write on public.drivers for all using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('mandate-documents','mandate-documents',false,15728640,array['application/pdf','image/jpeg','image/png','image/tiff','image/heic','image/heif'])

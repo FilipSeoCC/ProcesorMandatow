@@ -13,7 +13,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const member = await verifyMember(request, ["admin", "office"]);
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
 

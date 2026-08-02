@@ -9,13 +9,7 @@ type AuthSession = {
   expires_in?: number;
   user?: { email?: string };
 };
-const allRoles = [
-  "admin",
-  "dispatcher",
-  "office",
-  "scanner",
-  "viewer",
-] as const;
+const allRoles = ["admin", "boss", "user"] as const;
 
 function setSession(response: NextResponse, session: AuthSession) {
   const common = {

@@ -56,8 +56,8 @@ export async function POST(request: Request) {
     if (process.env.ROUTE_OPTIMIZATION_DEMO_MODE === "true") return NextResponse.json(demo(body));
     return NextResponse.json({ error: "Planowanie tras nie jest skonfigurowane." }, { status: 503 });
   }
-  const member = await verifyMember(request, ["admin", "dispatcher"]);
-  if (!member) return NextResponse.json({ error: "Zaloguj się jako administrator lub dyspozytor, aby użyć Google." }, { status: 401 });
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
+  if (!member) return NextResponse.json({ error: "Zaloguj się, aby użyć Google." }, { status: 401 });
 
   const now = new Date();
   const depotLocation = { latitude: body.depot.latitude, longitude: body.depot.longitude };

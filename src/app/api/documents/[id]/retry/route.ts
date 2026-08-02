@@ -22,7 +22,7 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id: documentId } = await params;
-  const member = await verifyMember(request, ["admin", "office", "scanner"]);
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();

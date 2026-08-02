@@ -25,7 +25,7 @@ type PageRow = { storage_path: string; original_name: string; mime_type: string;
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const member = await verifyMember(request, ["admin", "office"]);
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
   if (!member) return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
 
   const resendKey = process.env.RESEND_API_KEY?.trim();
