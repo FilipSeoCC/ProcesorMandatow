@@ -342,6 +342,14 @@ export default function MandatyWorkspace() {
   >([]);
   const [teamUpdating, setTeamUpdating] = useState<string | null>(null);
   const [teamError, setTeamError] = useState<string | null>(null);
+  // Role change is a permission change, not a value you fix like a typo —
+  // stage it and require an explicit confirm, same reasoning as the
+  // send-review-package dialog: no destructive action fires on a single
+  // accidental click.
+  const [teamPending, setTeamPending] = useState<{
+    userId: string;
+    role: "admin" | "boss" | "user";
+  } | null>(null);
   const [docEmployeeFilter, setDocEmployeeFilter] = useState("Wszyscy");
   const [docDateFrom, setDocDateFrom] = useState("");
   const [docDateTo, setDocDateTo] = useState("");
@@ -464,6 +472,7 @@ export default function MandatyWorkspace() {
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Nie udało się zmienić roli.");
+      setTeamPending(null);
       await loadTeam();
     } catch (reason) {
       setTeamError(reason instanceof Error ? reason.message : "Nie udało się zmienić roli.");
@@ -1461,32 +1470,59 @@ export default function MandatyWorkspace() {
                 <strong>Brak kont w zespole</strong>
               </div>
             ) : (
-              team.map((member) => (
-                <article key={member.userId} className={styles.bugCard}>
-                  <div>
-                    <strong>{member.name || member.email || member.userId}</strong>
-                    {member.name && member.email && <p>{member.email}</p>}
-                  </div>
-                  <label className={styles.selectBox}>
-                    <span className={styles.srOnly}>Rola</span>
-                    <select
-                      value={member.role}
-                      disabled={teamUpdating === member.userId}
-                      onChange={(event) =>
-                        changeTeamRole(
-                          member.userId,
-                          event.target.value as "admin" | "boss" | "user",
-                        )
-                      }
-                    >
-                      <option value="user">User (pracownik)</option>
-                      <option value="boss">Boss (kierownik/szef)</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                    <ChevronDown size={16} />
-                  </label>
-                </article>
-              ))
+              team.map((member) => {
+                const pending =
+                  teamPending?.userId === member.userId ? teamPending.role : null;
+                const saving = teamUpdating === member.userId;
+                return (
+                  <article key={member.userId} className={styles.bugCard}>
+                    <div>
+                      <strong>{member.name || member.email || member.userId}</strong>
+                      {member.name && member.email && <p>{member.email}</p>}
+                    </div>
+                    <div className={styles.teamRoleRow}>
+                      <label className={styles.selectBox}>
+                        <span className={styles.srOnly}>Rola</span>
+                        <select
+                          value={pending ?? member.role}
+                          disabled={saving}
+                          onChange={(event) =>
+                            setTeamPending({
+                              userId: member.userId,
+                              role: event.target.value as "admin" | "boss" | "user",
+                            })
+                          }
+                        >
+                          <option value="user">User (pracownik)</option>
+                          <option value="boss">Boss (kierownik/szef)</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                        <ChevronDown size={16} />
+                      </label>
+                      {pending && pending !== member.role && (
+                        <>
+                          <button
+                            type="button"
+                            className={styles.primaryButton}
+                            disabled={saving}
+                            onClick={() => changeTeamRole(member.userId, pending)}
+                          >
+                            {saving ? "Zapisuję…" : "Zatwierdź"}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            disabled={saving}
+                            onClick={() => setTeamPending(null)}
+                          >
+                            Anuluj
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                );
+              })
             )}
           </section>
         ) : activeView === "bugs" ? (
