@@ -2,6 +2,8 @@
 
 Next.js 16 + React 19 + TypeScript, Supabase (auth/DB/storage, RLS by role), Google Document AI (OCR) + Route Optimization API via Vercel OIDC Workload Identity Federation. Deployed on Vercel: procesor-mandatow.vercel.app.
 
+**New here? Read [`docs/stan-projektu.md`](docs/stan-projektu.md) first** — what the product is and who it's for, what works, what is broken or unfinished, the traps that have already cost time (assignment history, plate normalization, manual schema application), and what to do next. Then come back here for the working agreement, and read `.agents/log.md` for the chronological detail.
+
 ## Working with another agent on this repo
 
 Filip runs both Claude Code and Codex on this repo, not always at the same time, and doesn't want to manually re-explain context between us. Treat the other agent's prior work as a teammate's, not a stranger's PR.

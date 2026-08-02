@@ -100,3 +100,11 @@ Filip shared a screenshot of the client's "Włączone automatyzacje" panel — 8
 - Item 4 (dispatch/relocation) needs branches, which the data model has no concept of — `organizations` is the tenant, not a depot.
 
 Suggested order is in the doc; the short version is finish the current MVP for production first, then fuel-cards→TCO (independent, builds the cost ledger), then extend fines into re-invoicing.
+
+## 2026-08-02 10:30 — Claude — Added docs/stan-projektu.md as the onboarding brief
+
+Filip asked for a single file another LLM can read to know what we fixed, what exists and what is still open, so the next agent does not have to reconstruct it from this log. It is `docs/stan-projektu.md`, written in Polish, and `AGENTS.md` now points at it as the first thing to read.
+
+It covers the domain (rental vans + customer trailers crossing 3.5 t → e-TOLL penalty lands on the owner), the architecture, what works, the six things that are broken or unfinished (no invite flow, no tests, unmeasured OCR accuracy, route planner not persisted, missing CRON_SECRET/RESEND keys, schema applied by hand), and a "traps" section covering the assignment-history exclusion constraint, plate normalization, composite FKs, the partial-PATCH semantics and the swallow-the-real-error pattern that made two production failures undiagnosable.
+
+If you change any of those invariants, update that file — it is now the entry point, so a stale statement there is worse than no statement.
