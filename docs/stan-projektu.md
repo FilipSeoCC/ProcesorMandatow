@@ -136,7 +136,10 @@ sprawdzone i potwierdzone 2026-08-02. Przycisk "Nawiguj" wcześniej wyglądał n
 zepsuty z innego powodu: `target="_blank"` na linku do Google Maps nic nie
 robi w trybie `standalone` PWA (`manifest.ts`) na iOS — usunięte.
 
-### 5. Brakuje `RESEND_API_KEY` na produkcji
+### 5. `RESEND_API_KEY` — świadomie zaparkowane (**nie zaczynaj od nowa bez pytania Filipa**)
+
+Filip nie ma domeny pocztowej. Zdecydował **2026-08-02, żeby to zaparkować**,
+nie próbować obejść.
 
 Sprawdzasz jednym żądaniem, bez logowania:
 
@@ -144,18 +147,33 @@ Sprawdzasz jednym żądaniem, bez logowania:
 curl -s https://procesor-mandatow.vercel.app/api/health
 ```
 
-Stan na 2026-08-02 (po dodaniu `CRON_SECRET` — `ocrQueueConfigured` jest już
-`true`, kolejka OCR i auto-dopasowanie działają):
+`emailConfigured: false` jest **oczekiwane** i zostaje tak, dopóki Filip nie
+zdecyduje inaczej. Wysyłka pakietu do pracownika (`review-package`) zwraca
+503, a oba maile rejestracyjne (`src/lib/account-emails.ts` —
+"dziękujemy za rejestrację" i "przyznano dostęp") po prostu **nie wysyłają
+się w ogóle i nie zgłaszają błędu** (funkcje `sendRegistrationReceivedEmail`/
+`sendRoleGrantedEmail` cicho wracają, gdy brakuje kluczy) — reszta flow
+(blokada logowania, nadanie roli) działa niezależnie od tego.
 
-- `emailConfigured: false` — brak `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
-  Wysyłka pakietu do pracownika (`review-package`) zwraca 503, a oba nowe
-  maile rejestracyjne (`src/lib/account-emails.ts` — "dziękujemy za
-  rejestrację" i "przyznano dostęp") po prostu **nie wysyłają się w ogóle i
-  nie zgłaszają błędu** (funkcje `sendRegistrationReceivedEmail`/
-  `sendRoleGrantedEmail` cicho wracają, gdy brakuje kluczy) — reszta flow
-  (blokada logowania, nadanie roli) działa niezależnie od tego. Trzeba
-  ustawić te dwie zmienne w Vercelu, żeby którakolwiek wysyłka mailem
-  faktycznie zadziałała.
+**Sprawdzone i odrzucone alternatywy — nie proponuj ich ponownie:**
+
+- ~~Edycja treści szablonu Supabase Auth "Confirm signup" bez SMTP~~ —
+  **niemożliwe**. Pole Subject/Body w panelu (Supabase/Vercel) jest
+  wyszarzone, dopóki nie skonfigurujesz custom SMTP. Współdzielony mailer
+  Supabase wysyła wyłącznie domyślną, angielską treść — nie da się
+  spersonalizować bez tego samego SMTP/domeny, którego próbujemy uniknąć.
+- ~~Nadużycie innego typu maila Supabase (np. reset hasła) jako powiadomienia
+  "przyznano dostęp"~~ — odrzucone: user klikający link trafiłby w
+  prawdziwy formularz zmiany hasła, nie w informację o dostępie. Myląca
+  ścieżka, nie wdrażać.
+- Żadnego sposobu wysłania załącznika (skan mandatu w `review-package`) bez
+  SMTP nie ma — to twarde ograniczenie Supabase Auth, nie kwestia konfiguracji.
+
+**Jeśli temat wróci**, realne opcje są tylko dwie: zostać przy domyślnym
+angielskim mailu Supabase (zero kosztu, brak polskiej treści), albo
+skonfigurować SMTP/Resend całościowo — nie ma pośredniej, darmowej ścieżki.
+Tania domena z pocztą w pakiecie (~30–60 zł/rok, np. home.pl/OVH) odblokowuje
+to jednym ruchem, gdy Filip zdecyduje się to zrobić.
 
 ### 6. Schemat bazy trzeba wgrywać ręcznie
 
@@ -212,7 +230,7 @@ Kolejność, którą uważam za właściwą:
 
 1. ~~Zapraszanie użytkowników i zarządzanie rolami~~ — zrobione 2026-08-02 (patrz wyżej).
 2. ~~`CRON_SECRET` w Vercelu~~ — ustawione 2026-08-02, kolejka OCR i auto-dopasowanie działają.
-3. **`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu** — bez tego żadna wysyłka mailem (pakiet do pracownika, dwa maile rejestracyjne) nie działa.
+3. ~~`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu~~ — **zaparkowane 2026-08-02**, patrz punkt 5 wyżej. Nie odgrzewaj bez pytania Filipa.
 4. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
 5. **Testy `extractMandateFields`**.
 6. **Planer tras** — podpiąć do bazy albo ukryć.

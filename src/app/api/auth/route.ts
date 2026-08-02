@@ -286,8 +286,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           pendingApproval: true,
+          // Doesn't promise an email channel specifically: sendRegistrationReceivedEmail
+          // above is a no-op without RESEND_API_KEY (parked 2026-08-02, see
+          // docs/stan-projektu.md), and this branch fires only when Supabase's own
+          // "Confirm email" is off — the wording has to stay true either way.
           message:
-            "Dziękujemy za rejestrację! Twoje konto czeka na zatwierdzenie przez administratora — otrzymasz e-mail, gdy uzyskasz dostęp.",
+            "Dziękujemy za rejestrację! Twoje konto czeka na zatwierdzenie przez administratora.",
         },
         { status: 202 },
       );
