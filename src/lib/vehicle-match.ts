@@ -5,7 +5,10 @@ export type VehicleMatchResult =
   | { matched: true; responsibleName: string; responsibleTaxId: string; responsibleEmail: string }
   | { matched: false; reason: string };
 
-function normalizePlate(value: string) {
+// Exported so every write path stores/looks up plates the same way this
+// matcher compares them — an exact-string lookup elsewhere would miss
+// "WA 12345" vs "WA12345" and happily create a duplicate vehicle.
+export function normalizePlate(value: string) {
   return value.replace(/[\s-]/g, "").toUpperCase();
 }
 

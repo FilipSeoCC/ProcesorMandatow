@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
+import { normalizePlate } from "@/lib/vehicle-match";
 
 export const runtime = "nodejs";
 
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => null);
   const brand = text(body?.brand, 80);
   const model = text(body?.model, 80);
-  const registration = text(body?.registration, 15).toUpperCase();
+  const registration = normalizePlate(text(body?.registration, 15));
   const customerName = text(body?.customer, 200);
   const customerEmail = text(body?.customerEmail, 200);
   const customerTaxId = text(body?.customerTaxId, 20);
@@ -169,14 +170,21 @@ export async function POST(request: Request) {
       { status: 502 },
     );
 
+  // Compare the same way matchVehicleCustomer does, not by exact string: rows
+  // written before plates were normalized (and CSV imports with a space or
+  // dash) would otherwise miss here and create a second vehicle for the same
+  // car — which also splits its assignment history in two.
   const existingVehicleResponse = await fetch(
-    `${url}/rest/v1/vehicles?select=id&organization_id=eq.${member.organizationId}&registration_number=eq.${encodeURIComponent(registration)}&limit=1`,
+    `${url}/rest/v1/vehicles?select=id,registration_number&organization_id=eq.${member.organizationId}`,
     { headers, cache: "no-store" },
   );
   const existingVehicles = existingVehicleResponse.ok
     ? ((await existingVehicleResponse.json()) as VehicleRow[])
     : [];
-  let vehicleId = existingVehicles[0]?.id ?? null;
+  let vehicleId =
+    existingVehicles.find(
+      (item) => normalizePlate(item.registration_number ?? "") === registration,
+    )?.id ?? null;
   if (vehicleId) {
     await fetch(
       `${url}/rest/v1/vehicles?id=eq.${vehicleId}&organization_id=eq.${member.organizationId}`,

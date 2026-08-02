@@ -47,7 +47,13 @@ type CaseStatus =
   | "Zrealizowana";
 
 type CaseItem = {
+  // Stable identity (the document UUID for real cases) — used for React keys,
+  // selection and lookups. Deliberately NOT the case number: two letters from
+  // the same authority can legitimately carry the same one, and keying on it
+  // made the second document collide with the first and become unselectable.
   id: string;
+  // Human-facing case number shown in the UI. Display only.
+  caseNumber: string;
   documentId?: string;
   uploadedBy?: string | null;
   createdAt?: string;
@@ -166,6 +172,7 @@ function storedAccessToken() {
 const demoCases: CaseItem[] = [
   {
     id: "SM/8421/26",
+    caseNumber: "SM/8421/26",
     plate: "WI 2847K",
     sender: "Straż Miejska m.st. Warszawy",
     eventAt: "18.07.2026, 14:32",
@@ -177,6 +184,7 @@ const demoCases: CaseItem[] = [
   },
   {
     id: "CAN/1093/26",
+    caseNumber: "CAN/1093/26",
     plate: "WW 91R2",
     sender: "CANARD",
     eventAt: "15.07.2026, 08:07",
@@ -188,6 +196,7 @@ const demoCases: CaseItem[] = [
   },
   {
     id: "GITD/771/26",
+    caseNumber: "GITD/771/26",
     plate: "WX 5520M",
     sender: "Główny Inspektorat Transportu Drogowego",
     eventAt: "12.07.2026, 19:41",
@@ -199,6 +208,7 @@ const demoCases: CaseItem[] = [
   },
   {
     id: "SM/8134/26",
+    caseNumber: "SM/8134/26",
     plate: "WPR 77A9",
     sender: "Straż Miejska w Piasecznie",
     eventAt: "09.07.2026, 12:18",
@@ -403,7 +413,7 @@ export default function MandatyWorkspace() {
   const filtered = useMemo(
     () =>
       caseItems.filter((item) => {
-        const matchesQuery = `${item.plate} ${item.id} ${item.sender}`
+        const matchesQuery = `${item.plate} ${item.caseNumber} ${item.sender}`
           .toLowerCase()
           .includes(query.toLowerCase());
         return (
@@ -520,7 +530,9 @@ export default function MandatyWorkspace() {
       return [];
     }
     const mapped: CaseItem[] = result.documents.map((document) => ({
-      id: document.case_number || document.id.slice(0, 13).toUpperCase(),
+      id: document.id,
+      caseNumber:
+        document.case_number || document.id.slice(0, 13).toUpperCase(),
       documentId: document.id,
       uploadedBy: document.uploaded_by,
       plate: document.registration_number || "OCR…",
@@ -577,8 +589,8 @@ export default function MandatyWorkspace() {
         id: Date.now(),
         success,
         message: success
-          ? `OCR zakończony sukcesem: ${justFinished.id}`
-          : `Analiza OCR nie powiodła się: ${justFinished.id}`,
+          ? `OCR zakończony sukcesem: ${justFinished.caseNumber}`
+          : `Analiza OCR nie powiodła się: ${justFinished.caseNumber}`,
       });
     }
     setCaseItems(mapped);
@@ -886,7 +898,7 @@ export default function MandatyWorkspace() {
       const downloadUrl = URL.createObjectURL(pdf);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = `pismo-do-urzedu-${selected.id}.pdf`;
+      link.download = `pismo-do-urzedu-${selected.caseNumber}.pdf`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -967,7 +979,7 @@ export default function MandatyWorkspace() {
     if (!selected.documentId || deletingCase) return;
     if (
       !window.confirm(
-        `Usunąć sprawę ${selected.id}? Tej operacji nie można cofnąć.`,
+        `Usunąć sprawę ${selected.caseNumber}? Tej operacji nie można cofnąć.`,
       )
     )
       return;
@@ -1124,15 +1136,7 @@ export default function MandatyWorkspace() {
         );
       const form = new FormData();
       preparedFiles.forEach((file) => form.append("files", file.blob, file.name));
-      let token: string | null = null;
-      for (let index = 0; index < localStorage.length; index++) {
-        const key = localStorage.key(index);
-        if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-        try {
-          const session = JSON.parse(localStorage.getItem(key) || "null");
-          if (session?.access_token) token = String(session.access_token);
-        } catch {}
-      }
+      const token = storedAccessToken();
       const response = await fetch("/api/documents/upload", {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -1141,6 +1145,13 @@ export default function MandatyWorkspace() {
       const result = await response.json();
       if (!response.ok)
         throw new Error(result.error || "Nie udało się przesłać dokumentu.");
+      // The upload route answers 200 with mode:"demo" when Supabase isn't
+      // configured — nothing was stored. Treating that as success would tell
+      // the user their mandate is filed when it silently isn't.
+      if (result.mode === "demo")
+        throw new Error(
+          "Dokument NIE został zapisany — magazyn dokumentów nie jest skonfigurowany. Zgłoś to administratorowi i nie kasuj oryginału.",
+        );
       setUploadedPages([]);
       setScanOpen(false);
       await loadDocuments(true);
@@ -1560,7 +1571,7 @@ export default function MandatyWorkspace() {
                       </span>
                       <span className={styles.sender}>{item.sender}</span>
                       <span className={styles.caseMeta}>
-                        <span>{item.id}</span>
+                        <span>{item.caseNumber}</span>
                         <span>{item.receivedAt}</span>
                       </span>
                       <span className={styles.caseMeta}>
@@ -1681,7 +1692,7 @@ export default function MandatyWorkspace() {
                       </span>
                       <span className={styles.sender}>{item.sender}</span>
                       <span className={styles.caseMeta}>
-                        <span>{item.id}</span>
+                        <span>{item.caseNumber}</span>
                         <span>{item.receivedAt}</span>
                       </span>
                     </button>
@@ -1735,7 +1746,7 @@ export default function MandatyWorkspace() {
                       <ChevronLeft size={20} />
                     </button>
                     <div>
-                      <span className={styles.mono}>{selected.id}</span>
+                      <span className={styles.mono}>{selected.caseNumber}</span>
                       <h2>{selected.plate}</h2>
                     </div>
                   </div>
@@ -1841,7 +1852,7 @@ export default function MandatyWorkspace() {
                           }}
                           confident
                         />
-                        <Field label="Numer sprawy" value={selected.id} />
+                        <Field label="Numer sprawy" value={selected.caseNumber} />
                         <Field
                           label="Nadawca"
                           value={draft.sender}
@@ -2083,7 +2094,7 @@ export default function MandatyWorkspace() {
           <div className={styles.helpModal}>
             <header>
               <div>
-                <span>Sprawa {selected.id}</span>
+                <span>Sprawa {selected.caseNumber}</span>
                 <h2 id="send-package-title">Pakiet dla klienta</h2>
               </div>
               <button
@@ -2154,7 +2165,7 @@ export default function MandatyWorkspace() {
           <div className={styles.helpModal}>
             <header>
               <div>
-                <span>Sprawa {selected.id}</span>
+                <span>Sprawa {selected.caseNumber}</span>
                 <h2 id="authority-package-title">Pakiet do urzędu</h2>
               </div>
               <button
