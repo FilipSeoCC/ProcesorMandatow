@@ -28,6 +28,14 @@ export async function PATCH(
   if (!body)
     return NextResponse.json({ error: "Nieprawidłowe dane." }, { status: 422 });
 
+  // PATCH is a partial update: only touch what the caller actually sent.
+  // Building the payload unconditionally meant the review form — which posts
+  // six fields — silently nulled the case number and wiped every financial
+  // field (amount, currency, due dates, settlement status) on every save.
+  const sent = (key: string) =>
+    Object.prototype.hasOwnProperty.call(body, key);
+  const update: Record<string, unknown> = {};
+
   const registrationNumber = text(body.registrationNumber, 15).toUpperCase();
   const eventAt = text(body.eventAt, 30);
   const caseNumber = text(body.caseNumber, 80);
@@ -52,6 +60,27 @@ export async function PATCH(
   if (!["unknown", "not_applicable", "pending_review", "awaiting_payment", "settled", "cancelled"].includes(financialStatus))
     return NextResponse.json({ error: "Nieprawidłowy status rozliczenia." }, { status: 422 });
 
+  if (sent("registrationNumber"))
+    update.registration_number = registrationNumber || null;
+  if (sent("eventAt")) update.event_at = eventAt || null;
+  if (sent("caseNumber")) update.case_number = caseNumber || null;
+  if (sent("sender")) update.sender = sender || null;
+  if (sent("responsibleName")) update.responsible_name = responsibleName;
+  if (sent("responsibleTaxId")) update.responsible_tax_id = responsibleTaxId;
+  if (sent("responsibleEmail")) update.responsible_email = responsibleEmail;
+  if (sent("amountGross")) {
+    update.amount_gross = amountGross;
+    update.amount_confirmed_at = new Date().toISOString();
+    update.amount_confirmed_by = member.userId;
+  }
+  if (sent("currency")) update.currency = currency;
+  if (sent("paymentDueAt")) update.payment_due_at = paymentDueAt;
+  if (sent("responseDueAt")) update.response_due_at = responseDueAt;
+  if (sent("financialStatus")) update.financial_status = financialStatus;
+  // Confirming is the point of this endpoint, so it always stamps who/when.
+  update.confirmed_at = new Date().toISOString();
+  update.confirmed_by = member.userId;
+
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
     return NextResponse.json(
@@ -68,31 +97,29 @@ export async function PATCH(
         "Content-Type": "application/json",
         Prefer: "return=minimal",
       },
-      body: JSON.stringify({
-        registration_number: registrationNumber || null,
-        event_at: eventAt || null,
-        case_number: caseNumber || null,
-        sender: sender || null,
-        responsible_name: responsibleName,
-        responsible_tax_id: responsibleTaxId,
-        responsible_email: responsibleEmail,
-        amount_gross: amountGross,
-        currency,
-        payment_due_at: paymentDueAt,
-        response_due_at: responseDueAt,
-        financial_status: financialStatus,
-        amount_confirmed_at: new Date().toISOString(),
-        amount_confirmed_by: member.userId,
-        confirmed_at: new Date().toISOString(),
-        confirmed_by: member.userId,
-      }),
+      body: JSON.stringify(update),
     },
   );
-  if (!response.ok)
+  if (!response.ok) {
+    // PostgREST explains exactly what it rejected (missing column, constraint,
+    // bad type). Swallowing it left "Nie udało się zapisać sprawy" as the only
+    // signal, which is indistinguishable from a network problem and hides the
+    // most likely cause: schema.sql not applied to the live database.
+    const detail = await response.text().catch(() => "");
+    console.error("mandate_documents PATCH failed", response.status, detail);
+    let message = "";
+    try {
+      message = (JSON.parse(detail) as { message?: string }).message ?? "";
+    } catch {}
     return NextResponse.json(
-      { error: "Nie udało się zapisać sprawy." },
+      {
+        error: message
+          ? `Nie udało się zapisać sprawy: ${message}`
+          : "Nie udało się zapisać sprawy.",
+      },
       { status: 502 },
     );
+  }
   await writeAuditEvent({
     organizationId: member.organizationId,
     userId: member.userId,
