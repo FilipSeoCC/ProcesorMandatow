@@ -14,7 +14,8 @@ Pełny opis stanu projektu (co działa, co jest zepsute, pułapki) jest w [`docs
 - generowanie wezwania PDF, pakietu do pracownika (e-mail przez Resend) i osobnego pisma do urzędu,
 - planer tras dostaw oparty o Google Route Optimization,
 - log audytowy, zgłaszanie błędów ze zrzutem ekranu,
-- role: `admin` (pełny dostęp, zarządzanie zespołem), `boss` (jak user + zatwierdzanie spraw), `user` (codzienna obsługa spraw),
+- otwarta rejestracja z bramką zatwierdzania — nowe konto nie loguje się, dopóki admin/boss nie nada mu roli,
+- role: `admin` (pełny dostęp, zarządzanie kontami), `boss` (jak user + zatwierdzanie spraw i nowych kont), `user` (codzienna obsługa spraw), zarządzanie w widoku **Pracownicy**,
 - pełna funkcjonalność na telefonie, te same widoki co na desktopie.
 
 ## Uruchomienie lokalnie
