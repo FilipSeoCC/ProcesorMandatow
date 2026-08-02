@@ -107,6 +107,13 @@
   display: grid;
   gap: 14px;
 }
+.sidebarFooter button.navItem {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: #ffffff08;
+  border: 1px solid #ffffff12;
+}
 .securityNote {
   display: flex;
   gap: 10px;

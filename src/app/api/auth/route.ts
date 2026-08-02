@@ -110,11 +110,25 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const body = (await request.json().catch(() => null)) as {
     newPassword?: string;
+    firstName?: string;
+    lastName?: string;
   } | null;
   const newPassword = body?.newPassword ?? "";
-  if (newPassword.length < 12)
+  const updatingPassword = newPassword.length > 0;
+  const updatingName =
+    typeof body?.firstName === "string" || typeof body?.lastName === "string";
+  const firstName = body?.firstName?.trim() ?? "";
+  const lastName = body?.lastName?.trim() ?? "";
+  if (!updatingPassword && !updatingName)
+    return NextResponse.json({ error: "Brak danych do zapisania." }, { status: 422 });
+  if (updatingPassword && newPassword.length < 12)
     return NextResponse.json(
       { error: "Nowe hasło musi mieć minimum 12 znaków." },
+      { status: 422 },
+    );
+  if (updatingName && (!firstName || !lastName))
+    return NextResponse.json(
+      { error: "Podaj imię i nazwisko." },
       { status: 422 },
     );
   const { url, publishableKey } = getSupabaseServerEnv();
@@ -130,20 +144,31 @@ export async function PATCH(request: Request) {
       Authorization: `Bearer ${member.accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ password: newPassword }),
+    body: JSON.stringify({
+      ...(updatingPassword ? { password: newPassword } : {}),
+      // Supabase merges this into the existing user_metadata rather than
+      // replacing it, so unrelated fields set at signup (phone,
+      // privacy_consent_at) survive an edit that only touches the name.
+      ...(updatingName ? { data: { first_name: firstName, last_name: lastName } } : {}),
+    }),
     cache: "no-store",
   });
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
     return NextResponse.json(
-      { error: data.msg || data.error_description || "Nie udało się zmienić hasła." },
+      {
+        error:
+          data.msg ||
+          data.error_description ||
+          (updatingPassword ? "Nie udało się zmienić hasła." : "Nie udało się zapisać danych."),
+      },
       { status: 400 },
     );
   }
   await writeAuditEvent({
     organizationId: member.organizationId,
     userId: member.userId,
-    action: "password_changed",
+    action: updatingPassword ? "password_changed" : "name_changed",
     entityType: "user",
     entityId: member.userId,
   });

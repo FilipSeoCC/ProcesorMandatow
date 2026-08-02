@@ -220,21 +220,12 @@ const demoCases: CaseItem[] = [
   },
 ];
 
-const displayNameOverrides: Record<string, string> = {
-  "fkedziorawenet@gmail.com": "Filip Kędziora",
-  "fkedziora@wenet.pl": "user Kędziora",
-};
-
 function accountDisplayName(account: {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
 } | null) {
   if (!account) return "Konto użytkownika";
-  const override = account.email
-    ? displayNameOverrides[account.email.toLowerCase()]
-    : undefined;
-  if (override) return override;
   const full = `${account.firstName ?? ""} ${account.lastName ?? ""}`.trim();
   return full || account.email || "Konto użytkownika";
 }
@@ -299,6 +290,12 @@ export default function MandatyWorkspace() {
     "idle" | "saving" | "saved" | "error"
   >("idle");
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [nameFirst, setNameFirst] = useState("");
+  const [nameLast, setNameLast] = useState("");
+  const [nameStatus, setNameStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const [nameError, setNameError] = useState<string | null>(null);
   const [toast, setToast] = useState<{
     id: number;
     success: boolean;
@@ -681,6 +678,38 @@ export default function MandatyWorkspace() {
       setPasswordStatus("error");
       setPasswordError(
         reason instanceof Error ? reason.message : "Nie udało się zmienić hasła.",
+      );
+      return;
+    }
+  }
+
+  async function saveName() {
+    if (!nameFirst.trim() || !nameLast.trim()) {
+      setNameStatus("error");
+      setNameError("Podaj imię i nazwisko.");
+      return;
+    }
+    setNameStatus("saving");
+    setNameError(null);
+    try {
+      const response = await fetch("/api/auth", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName: nameFirst.trim(), lastName: nameLast.trim() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(data.error || "Nie udało się zapisać danych.");
+      setNameStatus("saved");
+      setAccount((current) =>
+        current
+          ? { ...current, firstName: nameFirst.trim(), lastName: nameLast.trim() }
+          : current,
+      );
+    } catch (reason) {
+      setNameStatus("error");
+      setNameError(
+        reason instanceof Error ? reason.message : "Nie udało się zapisać danych.",
       );
     }
   }
@@ -1312,6 +1341,18 @@ export default function MandatyWorkspace() {
               <small>Sesja szyfrowana</small>
             </span>
           </div>
+          <button
+            type="button"
+            className={styles.navItem}
+            onClick={() => {
+              setBugReportOpen(true);
+              setBugReportStatus("idle");
+              setBugReportError(null);
+            }}
+          >
+            <Bug size={19} />
+            Zgłoś błąd
+          </button>
           <div className={styles.accountMenuWrap}>
             {accountMenuOpen && (
               <div className={styles.accountMenu} role="menu">
@@ -1319,25 +1360,16 @@ export default function MandatyWorkspace() {
                   type="button"
                   role="menuitem"
                   onClick={() => {
+                    setNameFirst(account?.firstName ?? "");
+                    setNameLast(account?.lastName ?? "");
+                    setNameStatus("idle");
+                    setNameError(null);
                     setSettingsOpen(true);
                     setAccountMenuOpen(false);
                   }}
                 >
                   <UserRound size={16} />
                   Ustawienia
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={() => {
-                    setBugReportOpen(true);
-                    setBugReportStatus("idle");
-                    setBugReportError(null);
-                    setAccountMenuOpen(false);
-                  }}
-                >
-                  <Bug size={16} />
-                  Zgłoś błąd
                 </button>
                 <button
                   type="button"
@@ -2411,16 +2443,50 @@ export default function MandatyWorkspace() {
               </button>
             </header>
             <div className={styles.settingsField}>
-              <small>Imię i nazwisko</small>
-              <strong>{accountDisplayName(account)}</strong>
-            </div>
-            <div className={styles.settingsField}>
               <small>Adres e-mail</small>
               <strong>{account?.email || "—"}</strong>
             </div>
             <div className={styles.settingsField}>
               <small>Rola</small>
               <strong>{account?.role || "—"}</strong>
+            </div>
+            <div className={styles.settingsPasswordForm}>
+              <label>
+                Imię
+                <input
+                  value={nameFirst}
+                  onChange={(event) => {
+                    setNameFirst(event.target.value);
+                    setNameStatus("idle");
+                  }}
+                  placeholder="Imię"
+                />
+              </label>
+              <label>
+                Nazwisko
+                <input
+                  value={nameLast}
+                  onChange={(event) => {
+                    setNameLast(event.target.value);
+                    setNameStatus("idle");
+                  }}
+                  placeholder="Nazwisko"
+                />
+              </label>
+              {nameStatus === "error" && nameError && (
+                <p className={styles.error}>{nameError}</p>
+              )}
+              {nameStatus === "saved" && (
+                <p className={styles.settingsSaved}>Dane zostały zapisane.</p>
+              )}
+              <button
+                type="button"
+                className={styles.primaryButton}
+                disabled={nameStatus === "saving"}
+                onClick={saveName}
+              >
+                {nameStatus === "saving" ? "Zapisuję…" : "Zapisz imię i nazwisko"}
+              </button>
             </div>
             <div className={styles.settingsPasswordForm}>
               <label>
