@@ -3,6 +3,7 @@
 import {
   Bell,
   Bug,
+  Building2,
   Camera,
   Check,
   CheckCircle2,
@@ -33,6 +34,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import Branches from "./branches";
 import DeliveryPlanner from "./delivery-planner";
 import Employees from "./employees";
 import FleetManager from "./fleet-manager";
@@ -261,7 +263,7 @@ const bugStatusClass: Record<"nowe" | "w_trakcie" | "rozwiazane", string> = {
 
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<
-    "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs"
+    "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs" | "branches"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -1314,6 +1316,19 @@ export default function MandatyWorkspace() {
             <UserRound size={19} />
             Pracownicy
           </button>
+          {(account?.role === "admin" || account?.role === "boss") && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView("branches");
+                setMobileMenu(false);
+              }}
+              className={`${styles.navItem} ${activeView === "branches" ? styles.navActive : ""}`}
+            >
+              <Building2 size={19} />
+              Oddziały
+            </button>
+          )}
           {account?.role === "admin" && (
             <button
               type="button"
@@ -1423,7 +1438,9 @@ export default function MandatyWorkspace() {
                       ? "Pracownicy"
                       : activeView === "bugs"
                         ? "Zgłoszenia błędów"
-                        : "Zarządzanie flotą"}
+                        : activeView === "branches"
+                          ? "Oddziały"
+                          : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
@@ -1449,7 +1466,8 @@ export default function MandatyWorkspace() {
               </button>
             ) : activeView === "routes" ||
               activeView === "employees" ||
-              activeView === "bugs" ? null : (
+              activeView === "bugs" ||
+              activeView === "branches" ? null : (
               <button
                 className={styles.primaryButton}
                 onClick={() => setScanOpen(true)}
@@ -1479,6 +1497,8 @@ export default function MandatyWorkspace() {
           />
         ) : activeView === "routes" ? (
           <DeliveryPlanner />
+        ) : activeView === "branches" ? (
+          <Branches />
         ) : activeView === "bugs" ? (
           <section className={styles.bugList} aria-label="Zgłoszenia błędów">
             {bugReportsLoading && bugReports.length === 0 ? (
@@ -2121,7 +2141,8 @@ export default function MandatyWorkspace() {
         </button>
       ) : activeView === "routes" ||
         activeView === "employees" ||
-        activeView === "bugs" ? null : (
+        activeView === "bugs" ||
+        activeView === "branches" ? null : (
         <button
           className={styles.mobileScanButton}
           onClick={() => setScanOpen(true)}
