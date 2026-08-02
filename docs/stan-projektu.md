@@ -61,6 +61,7 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 - Flota i pracownicy — realny zapis do bazy, edycja, import CSV/XML floty.
 - Generowanie wezwania PDF, pakietu do pracownika i pisma do urzędu.
 - Log audytowy, zgłaszanie błędów ze zrzutem ekranu, panel administracyjny.
+- Otwarta rejestracja, zarządzanie rolami z UI (Zespół, admin-only) — 3 role: `admin`/`boss`/`user`.
 - Planer tras oparty o Google Route Optimization.
 - Pełna aplikacja na telefonie — te same funkcje co na desktopie.
 
@@ -68,17 +69,24 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 
 ## Co jest zepsute albo niedokończone — czytaj przed planowaniem
 
-### 1. Nie da się dodać drugiego użytkownika (blokada wdrożenia)
+### 1. ~~Nie da się dodać drugiego użytkownika~~ — rozwiązane 2026-08-02
 
-`bootstrap_organization` rzuca `'Invitation required'` przy drugiej rejestracji,
-a `/api/auth` blokuje rejestrację, gdy `ALLOW_PUBLIC_SIGNUP !== "true"`.
-**Nie istnieje żaden endpoint zapraszania** — `/api/team` ma tylko `GET`. Czyli
-dziś: pierwsze konto zostaje adminem i na tym koniec.
+Filip zdecydował: rejestracja jest teraz otwarta (`ALLOW_PUBLIC_SIGNUP=true`),
+każde nowe konto dołącza automatycznie jako `user` (`bootstrap_organization`
+już nie blokuje drugiej rejestracji). Model ról uproszczony do trzech:
 
-Nie ma też UI do zmiany ról. Role w bazie są (`admin`, `dispatcher`, `office`,
-`scanner`, `viewer`) i endpointy je sprawdzają, ale przypisać je można tylko
-ręcznie w SQL. To jest **pierwsza rzecz do zrobienia** przed wpuszczeniem
-kogokolwiek.
+- `admin` — pełny dostęp, w tym zarządzanie zespołem/rolami (widok **Zespół**),
+- `boss` — to co `user`, plus zatwierdzanie spraw („Zatwierdź dane"),
+- `user` — cała codzienna obsługa spraw/floty/tras, bez zatwierdzania.
+
+Stare, drobniejsze role (`dispatcher`, `office`, `scanner`, `viewer`) zostają w
+enumie bazy tylko dla zgodności wstecznej (migracja w `schema.sql` przepisuje
+istniejące rekordy na `user`) — **nie używaj ich ponownie** w RLS ani
+w sprawdzaniu ról w endpointach.
+
+Zmianę roli robi się teraz w UI (Zespół, tylko dla admina), nie w SQL.
+Zabezpieczenie: nie da się odebrać roli admina samemu sobie, jeśli jest się
+jedynym adminem w organizacji.
 
 ### 2. Zero testów
 
@@ -168,7 +176,7 @@ skasowania tej zmiennej i unieruchomienia planera.
 
 Kolejność, którą uważam za właściwą:
 
-1. **Zapraszanie użytkowników i zarządzanie rolami** — bez tego nie ma wdrożenia.
+1. ~~Zapraszanie użytkowników i zarządzanie rolami~~ — zrobione 2026-08-02 (patrz wyżej).
 2. **`CRON_SECRET` w Vercelu** — jedna zmienna odblokowuje dwie działające już funkcje.
 3. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
 4. **Testy `extractMandateFields`**.

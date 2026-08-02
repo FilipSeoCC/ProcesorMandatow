@@ -1,71 +1,58 @@
-# Procesor Mandatów — PoC
+# FlotaFlow — Procesor Mandatów
 
 > Część portfolio [AIOps](https://www.ai-ops.pl) — wdrożenia AI i automatyzacja procesów dla firm. Zobacz [żywe demo](https://procesor-mandatow.vercel.app/).
 
-Responsywny prototyp interfejsu do obsługi korespondencji mandatowej dla firmy zarządzającej flotą pojazdów.
+Aplikacja dla firm wynajmujących pojazdy (busy, przyczepy), do których trafiają mandaty i wezwania (e-TOLL, straż miejska, policja, GITD) wystawione na właściciela auta, mimo że w danym momencie z pojazdu korzystał klient. FlotaFlow automatyzuje cały łańcuch: **skan pisma → OCR → numer rejestracyjny i data zdarzenia → dopasowanie do historii wynajmu → dane klienta → wezwanie PDF i pakiet do przekazania dalej**.
 
-## Zakres demonstracji
+Pełny opis stanu projektu (co działa, co jest zepsute, pułapki) jest w [`docs/stan-projektu.md`](docs/stan-projektu.md).
 
-- kolejka spraw z wyszukiwaniem i filtrami,
-- podgląd zeskanowanego dokumentu,
-- dane rozpoznane przez OCR wraz z poziomem pewności,
-- dopasowanie użytkownika pojazdu na podstawie daty zdarzenia,
-- korekta i zatwierdzanie danych,
-- mobilne dodawanie zdjęcia lub pliku PDF/JPG.
-- kartoteka floty z aktualnym przypisaniem pojazdu do klienta,
-- import i aktualizacja pojazdów z plików CSV lub XML.
+## Funkcje
 
-Minimalny zakres importu floty: `marka`, `model`, `nr_rej`, `klient`, `data_czas`.
+- Skan dokumentu z telefonu → OCR (Google Document AI) → wyciągnięcie numeru rejestracyjnego, daty i godziny zdarzenia,
+- automatyczne dopasowanie klienta na podstawie historii wynajmu pojazdu, z ręcznym „Zmień dopasowanie" i cykliczną kolejką ponawiania,
+- kartoteka floty i pracowników (kierowców), import/aktualizacja z CSV/XML,
+- generowanie wezwania PDF, pakietu do pracownika (e-mail przez Resend) i osobnego pisma do urzędu,
+- planer tras dostaw oparty o Google Route Optimization,
+- log audytowy, zgłaszanie błędów ze zrzutem ekranu,
+- role: `admin` (pełny dostęp, zarządzanie zespołem), `boss` (jak user + zatwierdzanie spraw), `user` (codzienna obsługa spraw),
+- pełna funkcjonalność na telefonie, te same widoki co na desktopie.
 
-## Podział urządzeń
-
-- **telefon:** dedykowany skaner, kompletowanie stron i przekazanie dokumentu do bazy,
-- **desktop:** OCR, kolejka spraw, zarządzanie flotą, dopasowanie klienta i dalsze procesowanie korespondencji.
-
-Interfejs wykorzystuje dane przykładowe. PoC nie zawiera jeszcze backendu, OCR ani trwałego zapisu.
-
-## Uruchomienie
+## Uruchomienie lokalnie
 
 ```bash
 npm install
 npm run dev
 ```
 
-Następnie otwórz [http://localhost:4173](http://localhost:4173).
+Otwórz [http://localhost:4173](http://localhost:4173). Skopiuj `.env.example` do `.env.local` i uzupełnij zmienne — patrz sekcja niżej.
 
 ## Technologie
 
-- Next.js 16,
-- React 19,
-- TypeScript,
-- CSS Modules,
-- Lucide Icons.
+- Next.js 16 (App Router), React 19, TypeScript,
+- Supabase (Postgres + Auth + Storage, RLS wg roli i organizacji),
+- Google Document AI (OCR) i Google Route Optimization API przez Vercel OIDC Workload Identity Federation,
+- Resend (e-mail),
+- Vercel (hosting, cron).
 
-## Mobilny planer dostaw
+## Konfiguracja produkcyjna
 
-Na telefonie dolna nawigacja rozdziela dwa zadania: `Skaner` oraz `Dostawy`. Planer pozwala wybrać auta, ułożyć kolejność punktów, zmienić ją ręcznie i otworzyć gotową trasę w Google Maps.
+Zmienne środowiskowe (patrz `.env.example`) trzeba ustawić w Vercelu:
 
-Endpoint `POST /api/routes/optimize` działa w dwóch trybach:
+- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` — baza i auth,
+- `GOOGLE_DOCUMENT_AI_PROCESSOR_ID`, `GOOGLE_DOCUMENT_AI_LOCATION`, `GOOGLE_WIF_AUDIENCE`, `GOOGLE_CLOUD_PROJECT_ID` — OCR i planer tras (WIF, bez klucza),
+- `GOOGLE_MAPS_SERVER_API_KEY` — **osobny** klucz do geokodowania adresów w planerze tras (Maps Geocoding API — inne API niż Route Optimization, nadal wymaga klucza),
+- `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `MANDATE_REVIEW_EMAIL`, `APP_URL` — wysyłka pakietu do pracownika,
+- `CRON_SECRET` — odblokowuje kolejkę ponawiania OCR i auto-dopasowania (`/api/internal/*`, harmonogram w `vercel.json`),
+- `ALLOW_PUBLIC_SIGNUP` — czy rejestracja jest otwarta (nowe konta dostają rolę `user`),
+- `ROUTE_OPTIMIZATION_DEMO_MODE` — czy planer tras ma cichym trybem demo zastępować brak konfiguracji Google (domyślnie `false` — bez konfiguracji zwraca błąd zamiast fałszywego wyniku).
 
-- bez konfiguracji — lokalny algorytm demonstracyjny, dzięki któremu PoC działa od razu,
-- z `GOOGLE_MAPS_SERVER_API_KEY` i `GOOGLE_CLOUD_PROJECT_ID` — Google Route Optimization API.
-
-Skopiuj `.env.example` do `.env.local` i wpisz nowy, obrócony klucz. Sekret Google nie może mieć prefiksu `NEXT_PUBLIC_` ani trafić do repozytorium. Gdy Google jest skonfigurowane, Route Handler wymaga poprawnej sesji Supabase i roli `admin` albo `dispatcher`.
+Sprawdź stan konfiguracji bez logowania: `curl https://procesor-mandatow.vercel.app/api/health`.
 
 ## Model danych Supabase
 
-Plik `supabase/schema.sql` zawiera fundament bazy dla:
+`supabase/schema.sql` to pełny schemat — **nie jest automatycznie stosowany**, trzeba go ręcznie uruchomić w Supabase SQL Editor po każdej zmianie (wszystko jest idempotentne, `add column if not exists`/`update`). Zawiera: organizacje i członkostwa z rolami, klientów i pojazdów, historię przypisań pojazd→klient (z ograniczeniem wykluczającym nakładające się okresy), zlecenia dostawy i trasy, dokumenty mandatowe z polami finansowymi, log audytowy, RLS.
 
-- organizacji i członkostw z rolami `admin`, `dispatcher`, `office`, `scanner`, `viewer`,
-- klientów i pojazdów,
-- historii przypisania pojazdu do klienta bez nakładających się okresów,
-- zleceń dostawy, planów tras i przystanków,
-- audytu oraz polityk Row Level Security rozdzielających odczyt i zapis według roli.
-- prywatnego bucketa `mandate-documents` i metadanych stron dokumentu.
-
-Po uruchomieniu schematu pierwszy zalogowany użytkownik tworzy firmę przez funkcję RPC `bootstrap_organization`. Skaner zapisuje pliki w Supabase tylko po zweryfikowaniu roli `admin`, `office` lub `scanner`; bez konfiguracji wyraźnie pokazuje tryb demonstracyjny.
-
-Adresy dostaw są przekazywane do Google w celu wyznaczenia trasy. Przed wdrożeniem produkcyjnym należy ująć ten proces w dokumentacji RODO i właściwych umowach powierzenia.
+Pierwsze konto zakłada organizację i zostaje adminem (`bootstrap_organization`). Kolejne rejestracje (gdy `ALLOW_PUBLIC_SIGNUP=true`) dołączają jako `user` — awans na `boss`/`admin` odbywa się w aplikacji, w widoku **Zespół** (dostępnym dla adminów).
 
 ---
 
