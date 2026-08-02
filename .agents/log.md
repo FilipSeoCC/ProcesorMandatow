@@ -171,3 +171,13 @@ Filip's ask: registration stays open (no invite gate), but a new self-registered
 **Sequencing note for future schema changes on this table**: this one shipped schema-first — Filip ran the updated `schema.sql` in the SQL Editor, confirmed clean, *then* I pushed the code. Do this in that order for any change where the app code and a new/renamed column must exist together, or every login/signup breaks in the gap between deploy and manual SQL application.
 
 **Not yet verified live**: Filip hasn't yet tried a real end-to-end registration → approval → email flow in production. Worth confirming Resend actually delivers both emails (correct `RESEND_FROM_EMAIL` domain verification, etc.) next time a real signup happens.
+
+## 2026-08-02 — Claude — "Nawiguj" button unresponsive in route planner (commit `568f6f3`)
+
+Filip's report ("jak zmieniłem kolejność w plannerze trasy to tez nie działa") turned out to be about a different button than it first sounded like. Before touching anything I simulated `move()`'s array-swap logic in isolation (outside the app, just the reducer) across multiple sequential moves — it was correct. Asked Filip directly what he actually clicked; he confirmed: **manual reordering itself works fine**, the real symptom is clicking "Nawiguj" (the Google Maps handoff link) does nothing.
+
+Root cause: `src/app/delivery-planner.tsx`'s "Nawiguj" link had `target="_blank"`. `manifest.ts` declares `display: "standalone"` and this app gets added to drivers' home screens as a PWA — WebKit's standalone mode has no "new tab" to open into, so `target="_blank"` silently no-ops on iOS instead of doing anything. Removed `target="_blank"` (kept `rel="noreferrer"`); navigating in the same context is actually the right behavior here anyway, since mobile OSes intercept a `google.com/maps/dir` universal link and hand off to the native Maps app regardless of tab context.
+
+**Not yet confirmed fixed on a real phone** — worth Filip testing "Nawiguj" from the installed home-screen PWA on an actual delivery run. If `target="_blank"` needs to come back for some other reason later, don't — this exact combination (standalone PWA + target=_blank) is the trap.
+
+This closes out the full batch of bugs from Filip's last big message (Origin/Brak dostępu, select-arrow click, boss role cap, Zespol/Pracownicy merge, registration approval gate, route-planner button) — nothing outstanding from that batch.
