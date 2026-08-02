@@ -13,8 +13,9 @@ const inter = Inter({
 export const metadata: Metadata = {
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "FlotaFlow", statusBarStyle: "default" },
-  title: "Procesor Mandatów — PoC",
-  description: "Responsywny prototyp obsługi korespondencji mandatowej dla floty pojazdów.",
+  title: "FlotaFlow — Procesor Mandatów",
+  description: "Obsługa korespondencji mandatowej i e-TOLL dla floty pojazdów.",
+  icons: { icon: "/icon.svg" },
 };
 
 export const viewport: Viewport = {
