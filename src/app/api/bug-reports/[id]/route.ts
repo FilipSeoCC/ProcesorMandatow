@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { verifyMember } from "@/lib/supabase-auth";
 import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
-const validStatuses = new Set(["nowe", "w_trakcie", "rozwiazane"]);
+const validStatuses = new Set([
+  "nowe",
+  "w_trakcie",
+  "rozwiazane",
+  "brak_realizacji",
+]);
 
 export async function PATCH(
   request: Request,

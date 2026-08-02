@@ -253,7 +253,7 @@ create policy audit_read on public.audit_events for select using(public.has_org_
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());
 create policy mandate_status_events_read on public.mandate_status_events for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 
-do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane','brak_realizacji'); exception when duplicate_object then null; end $$;
 create table if not exists public.bug_reports (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   reporter_id uuid not null references auth.users(id) on delete cascade, reporter_email text not null default '',
@@ -377,3 +377,21 @@ alter table public.vehicle_relocations enable row level security;
 drop policy if exists relocations_read on public.vehicle_relocations; drop policy if exists relocations_insert on public.vehicle_relocations;
 create policy relocations_read on public.vehicle_relocations for select using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
 create policy relocations_insert on public.vehicle_relocations for insert with check(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]) and relocated_by=auth.uid());
+
+-- Bell notifications: per-member "last opened the notifications panel" mark,
+-- so the dot clears on open rather than on the underlying item's status
+-- (that's what the Błędy nav badge already does, separately, by counting
+-- open reports — these two are deliberately different signals).
+alter table public.organization_members add column if not exists notifications_seen_at timestamptz;
+
+-- ALTER TYPE ... ADD VALUE cannot run in the same transaction as anything
+-- that USES the new value (Postgres restriction, independent of whether it's
+-- wrapped in a DO block — a DO block IS a transaction block, and Supabase's
+-- SQL Editor runs a whole pasted script as one transaction). This bit Codex
+-- once already (see .agents/log.md, "ALTER TYPE ... ADD VALUE" entry) with a
+-- do $$ ... exception when others then null $$ wrapper that silently
+-- swallowed the failure. On an existing database, run this ONE line as its
+-- own separate SQL Editor execution, THEN run the rest of this file
+-- (a fresh database doesn't need the split — create type already lists all
+-- four values below).
+alter type public.bug_report_status add value if not exists 'brak_realizacji';
