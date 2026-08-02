@@ -146,6 +146,7 @@ export default function DeliveryPlanner() {
     try {
       const draft = JSON.parse(localStorage.getItem(routeDraftKey) || "null");
       if (draft?.result?.orderedStopIds && Array.isArray(draft.selected)) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the saved route draft on mount; localStorage cannot be read during render
         setSelected(draft.selected);
         setResult(draft.result);
         setCompletedIds(
@@ -326,9 +327,37 @@ export default function DeliveryPlanner() {
       setLoading(false);
     }
   }
+  // Navigate to the address, not to raw coordinates. Google reverse-geocodes a
+  // bare lat/lng to the nearest named place, so the driver was shown things
+  // like a school instead of "Postępu 14" and could not tell whether the pin
+  // was right. The address here is Google's own formatted_address from the
+  // geocoding step, so it resolves back to the same point.
   const navigationUrl = currentStop
-    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${currentStop.latitude},${currentStop.longitude}`)}&travelmode=driving&dir_action=navigate`
+    ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
+        currentStop.address?.trim() ||
+          `${currentStop.latitude},${currentStop.longitude}`,
+      )}&travelmode=driving&dir_action=navigate`
     : "";
+
+  // Whole remaining route in one Maps link, in the order we optimized. Google's
+  // URL API caps waypoints at 9, so with more stops we hand over as many as it
+  // accepts and the driver reopens the link after working through them.
+  const mapsPoint = (stop: { address: string; latitude: number; longitude: number }) =>
+    stop.address?.trim() || `${stop.latitude},${stop.longitude}`;
+  const remainingStops = ordered.filter(
+    (item) => !completedIds.includes(item.id) && !failedIds.includes(item.id),
+  );
+  const routeUrl = (() => {
+    if (remainingStops.length < 2) return "";
+    const capped = remainingStops.slice(0, 10);
+    const last = capped[capped.length - 1];
+    const waypoints = capped.slice(0, -1).map(mapsPoint);
+    return `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+      depot.address,
+    )}&destination=${encodeURIComponent(mapsPoint(last))}&waypoints=${encodeURIComponent(
+      waypoints.join("|"),
+    )}&travelmode=driving`;
+  })();
 
   return (
     <div className={styles.planner}>
@@ -699,11 +728,25 @@ export default function DeliveryPlanner() {
             ) : result.skippedStopIds.length > 0 ? (
               <button disabled>Popraw plan</button>
             ) : currentStop ? (
-              <a href={navigationUrl} target="_blank" rel="noopener noreferrer">
-                <Navigation size={19} />
-                Nawiguj do klienta
-                <ExternalLink size={15} />
-              </a>
+              <>
+                <a href={navigationUrl} target="_blank" rel="noopener noreferrer">
+                  <Navigation size={19} />
+                  Nawiguj do klienta
+                  <ExternalLink size={15} />
+                </a>
+                {routeUrl && (
+                  <a
+                    className={styles.wholeRoute}
+                    href={routeUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    <Route size={19} />
+                    Cała trasa w Mapach ({remainingStops.length})
+                    <ExternalLink size={15} />
+                  </a>
+                )}
+              </>
             ) : (
               <button disabled>Trasa zakończona</button>
             )}
