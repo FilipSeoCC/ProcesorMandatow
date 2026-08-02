@@ -60,8 +60,13 @@ export async function POST(request: Request) {
       if (data.status === "REQUEST_DENIED")
         return NextResponse.json(
           {
-            error:
-              "Google odrzucił zapytanie o adres. Najczęstsza przyczyna: w projekcie Google Cloud nie jest włączone Geocoding API albo klucz jest ograniczony do innego API.",
+            // Google's own error_message distinguishes "API not enabled" from
+            // "key has referer restrictions" from "billing disabled" — passing
+            // it through turns three guesses into one instruction. It is a
+            // diagnostic string from Google; it never contains the key.
+            error: `Google odrzucił klucz Maps${
+              data.error_message ? `: ${data.error_message}` : ""
+            } — sprawdź, czy w projekcie Google Cloud jest włączone Geocoding API, czy klucz nie ma ograniczenia HTTP referrer (to wywołanie idzie z serwera) i czy projekt ma włączone rozliczanie.`,
           },
           { status: 503 },
         );
