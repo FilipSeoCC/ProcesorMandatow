@@ -1,6 +1,8 @@
 .planner {
   min-height: calc(100dvh - 122px);
-  padding: 20px 16px 118px;
+  /* 118px of bottom padding existed only to clear the formerly-fixed
+     "Zoptymalizuj trasę" button; it now scrolls with the content. */
+  padding: 20px 16px max(28px, env(safe-area-inset-bottom));
   background: #f4f7fb;
   color: #172033;
 }
@@ -252,12 +254,14 @@
   gap: 3px;
   align-items: center;
 }
+/* Deliberately in normal flow, not position:fixed. As a fixed element it sat
+   permanently on top of the delivery list — mid-scroll it covered whichever
+   card happened to be behind it, and no amount of container padding fixes
+   that, since padding only clears the end of the document. It follows the
+   list it acts on, which is where the user is looking anyway. */
 .optimize {
-  position: fixed;
-  z-index: 11;
-  left: 16px;
-  right: 16px;
-  bottom: calc(72px + env(safe-area-inset-bottom));
+  width: 100%;
+  margin-top: 14px;
   min-height: 54px;
   border-radius: 13px;
   background: #2563eb;

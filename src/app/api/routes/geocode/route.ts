@@ -33,6 +33,7 @@ export async function POST(request: Request) {
     );
     const data = (await response.json()) as {
       status?: string;
+      error_message?: string;
       results?: Array<{
         formatted_address?: string;
         geometry?: { location?: { lat?: number; lng?: number } };
@@ -41,9 +42,43 @@ export async function POST(request: Request) {
     const first = data.results?.[0];
     const location = first?.geometry?.location;
     if (data.status !== "OK" || !location) {
+      // Only ZERO_RESULTS means the address is genuinely unknown. Every other
+      // status is a configuration or quota problem on our side, and reporting
+      // those as "address not found" sends the user off retyping a perfectly
+      // valid address while the real cause (API not enabled, key restricted to
+      // the wrong API, billing disabled) stays invisible.
+      console.error(
+        "Geocoding rejected",
+        data.status,
+        data.error_message ?? "",
+      );
+      if (data.status === "ZERO_RESULTS")
+        return NextResponse.json(
+          { error: "Nie znaleziono tego adresu. Sprawdź pisownię ulicy i miasta." },
+          { status: 422 },
+        );
+      if (data.status === "REQUEST_DENIED")
+        return NextResponse.json(
+          {
+            error:
+              "Google odrzucił zapytanie o adres. Najczęstsza przyczyna: w projekcie Google Cloud nie jest włączone Geocoding API albo klucz jest ograniczony do innego API.",
+          },
+          { status: 503 },
+        );
+      if (
+        data.status === "OVER_QUERY_LIMIT" ||
+        data.status === "OVER_DAILY_LIMIT"
+      )
+        return NextResponse.json(
+          {
+            error:
+              "Przekroczono limit zapytań Google Maps lub w projekcie nie jest włączone rozliczanie (billing).",
+          },
+          { status: 503 },
+        );
       return NextResponse.json(
-        { error: "Nie znaleziono tego adresu." },
-        { status: 422 },
+        { error: `Usługa map odpowiedziała błędem (${data.status ?? "brak statusu"}).` },
+        { status: 502 },
       );
     }
     return NextResponse.json({
