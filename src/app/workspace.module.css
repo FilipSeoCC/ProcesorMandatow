@@ -401,6 +401,7 @@
 }
 .searchBox,
 .selectBox {
+  position: relative;
   height: 40px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -410,6 +411,18 @@
   padding: 0 10px;
   color: #7a8798;
   background: #fbfcfe;
+}
+/* The chevron is a flex sibling of <select>, not an overlay on top of it —
+   its own box only covers its own small area, so a tap that lands on the
+   glyph itself never reaches the select. Pull it out of flow and let clicks
+   pass straight through to the select underneath, wherever in the field the
+   tap lands. */
+.selectBox svg {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
 }
 .searchBox:focus-within,
 .selectBox:focus-within {
@@ -431,6 +444,9 @@
 .selectBox select {
   appearance: none;
   cursor: pointer;
+  /* Reaches under the absolutely-positioned chevron so the whole field is
+     clickable, not just the text portion to its left. */
+  padding-right: 18px;
 }
 .selectBox input {
   min-width: 0;

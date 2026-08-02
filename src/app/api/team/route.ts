@@ -8,9 +8,9 @@ export const runtime = "nodejs";
 const ASSIGNABLE_ROLES = new Set(["admin", "boss", "user"]);
 
 export async function GET(request: Request) {
-  // This route exposes employee names and e-mail addresses. It is not needed
-  // by scanner/viewer accounts and must not become an internal address book.
-  const member = await verifyMember(request, ["admin"]);
+  // This route exposes employee names and e-mail addresses. Plain 'user'
+  // accounts don't need it and it must not become an internal address book.
+  const member = await verifyMember(request, ["admin", "boss"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const { url, secretKey } = getSupabaseServerEnv();
@@ -66,7 +66,7 @@ export async function GET(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const member = await verifyMember(request, ["admin"]);
+  const member = await verifyMember(request, ["admin", "boss"]);
   if (!member)
     return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const body = (await request.json().catch(() => null)) as {
@@ -80,6 +80,14 @@ export async function PATCH(request: Request) {
       { error: "Podaj użytkownika i jedną z ról: admin, boss, user." },
       { status: 422 },
     );
+  // Boss can grant at most boss/user — never admin, and never touch an
+  // existing admin's role (demoting one would be a de facto admin action).
+  // Only 'admin' manages other admins.
+  if (member.role === "boss" && role === "admin")
+    return NextResponse.json(
+      { error: "Rola boss może nadawać najwyżej uprawnienia boss." },
+      { status: 403 },
+    );
 
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
@@ -88,6 +96,21 @@ export async function PATCH(request: Request) {
       { status: 503 },
     );
   const headers = adminHeaders(secretKey);
+
+  if (member.role === "boss") {
+    const targetResponse = await fetch(
+      `${url}/rest/v1/organization_members?select=role&organization_id=eq.${member.organizationId}&user_id=eq.${encodeURIComponent(targetUserId)}`,
+      { headers, cache: "no-store" },
+    );
+    const targets = targetResponse.ok
+      ? ((await targetResponse.json()) as Array<{ role: string }>)
+      : [];
+    if (targets[0]?.role === "admin")
+      return NextResponse.json(
+        { error: "Rola boss nie może zmieniać uprawnień administratora." },
+        { status: 403 },
+      );
+  }
 
   // Refuse to demote the last admin — otherwise a lone admin could lock
   // everyone (including themselves) out of role management permanently.
