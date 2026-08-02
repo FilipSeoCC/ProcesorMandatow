@@ -29,8 +29,16 @@ export async function verifyMember(
   const authorization =
     request.headers.get("authorization") ??
     (cookieToken ? `Bearer ${decodeURIComponent(cookieToken)}` : null);
-  const origin = request.headers.get("origin");
-  if (cookieToken && origin && origin !== new URL(request.url).origin) return null;
+  // No separate Origin-vs-request.url check here — the ff-access cookie is
+  // already SameSite=Lax (set in api/auth/route.ts), which is the standard,
+  // reliable CSRF defense for cookie auth. A manual Origin-equality check on
+  // top of that was rejecting legitimate same-origin requests in production:
+  // Vercel's multiple valid hostnames (production domain, per-deployment
+  // preview URLs, internal proxying) don't always agree with what
+  // `new URL(request.url).origin` reconstructs, so real logged-in users were
+  // getting silently 401'd on fetch() calls (which send Origin) while page
+  // navigations (which often don't) still worked — exactly the "Brak
+  // dostepu" / vanishing Flota-Pracownicy-Zespol symptom Filip hit.
   const accessToken = authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
   if (!supabaseUrl || !anonKey || !accessToken) return null;
 

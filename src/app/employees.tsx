@@ -1,8 +1,9 @@
 "use client";
 
-import { CircleAlert, Phone, Plus, Search, Trash2, UsersRound, X } from "lucide-react";
+import { CircleAlert, ChevronDown, Phone, Plus, Search, ShieldCheck, Trash2, UsersRound, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import styles from "./fleet-manager.module.css";
+import wstyles from "./workspace.module.css";
 
 export type Employee = {
   id: string;
@@ -10,6 +11,24 @@ export type Employee = {
   phone: string;
   email: string;
   status: "Dostępny" | "W trasie" | "Urlop" | "Nieaktywny";
+};
+
+export type TeamMember = {
+  userId: string;
+  role: string;
+  email: string | null;
+  name: string | null;
+};
+
+type TeamProps = {
+  team: TeamMember[];
+  teamPending: { userId: string; role: "admin" | "boss" | "user" } | null;
+  teamUpdating: string | null;
+  teamError: string | null;
+  viewerRole: string | null;
+  onStagePendingRole: (userId: string, role: "admin" | "boss" | "user") => void;
+  onConfirmRole: (userId: string, role: "admin" | "boss" | "user") => void;
+  onCancelRole: () => void;
 };
 
 function normalize(value: string) {
@@ -31,7 +50,16 @@ const emptyForm = {
   status: "Dostępny" as Employee["status"],
 };
 
-export default function Employees() {
+export default function Employees({
+  team,
+  teamPending,
+  teamUpdating,
+  teamError,
+  viewerRole,
+  onStagePendingRole,
+  onConfirmRole,
+  onCancelRole,
+}: TeamProps) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -288,6 +316,158 @@ export default function Employees() {
         {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
         {!loading && !loadError && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pracowników.</div>}
       </section>
+
+      {(viewerRole === "admin" || viewerRole === "boss") && (
+        <section className={styles.fleetCard} aria-label="Konta i uprawnienia">
+          <div className={styles.cardHeader}>
+            <div>
+              <h2>Konta i uprawnienia</h2>
+              <p>
+                Nowe konta rejestrują się samodzielnie z rolą &bdquo;user&rdquo;
+                (bez zatwierdzania spraw). Nadaj &bdquo;boss&rdquo; albo
+                &bdquo;admin&rdquo; poniżej.
+              </p>
+            </div>
+          </div>
+          {teamError && <p className={wstyles.uploadError}>{teamError}</p>}
+          <div className={styles.tableWrap}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Konto</th>
+                  <th>Rola</th>
+                  <th>Akcje</th>
+                </tr>
+              </thead>
+              <tbody>
+                {team.map((member) => {
+                  const locked = viewerRole === "boss" && member.role === "admin";
+                  const pending =
+                    teamPending?.userId === member.userId ? teamPending.role : null;
+                  const saving = teamUpdating === member.userId;
+                  return (
+                    <tr key={member.userId}>
+                      <td>
+                        <strong>{member.name || member.email || member.userId}</strong>
+                        {member.name && member.email && <span>{member.email}</span>}
+                      </td>
+                      <td>
+                        {locked ? (
+                          <span className={styles.activeStatus}>
+                            <ShieldCheck size={12} /> Admin
+                          </span>
+                        ) : (
+                          <label className={wstyles.selectBox}>
+                            <span className={wstyles.srOnly}>Rola</span>
+                            <select
+                              value={pending ?? member.role}
+                              disabled={saving}
+                              onChange={(event) =>
+                                onStagePendingRole(
+                                  member.userId,
+                                  event.target.value as "admin" | "boss" | "user",
+                                )
+                              }
+                            >
+                              <option value="user">User (pracownik)</option>
+                              <option value="boss">Boss (kierownik/szef)</option>
+                              {viewerRole === "admin" && <option value="admin">Admin</option>}
+                            </select>
+                            <ChevronDown size={16} />
+                          </label>
+                        )}
+                      </td>
+                      <td className={styles.rowActions}>
+                        {!locked && pending && pending !== member.role && (
+                          <>
+                            <button
+                              type="button"
+                              className={wstyles.primaryButton}
+                              disabled={saving}
+                              onClick={() => onConfirmRole(member.userId, pending)}
+                            >
+                              {saving ? "Zapisuję…" : "Zatwierdź"}
+                            </button>
+                            <button
+                              type="button"
+                              className={wstyles.secondaryButton}
+                              disabled={saving}
+                              onClick={onCancelRole}
+                            >
+                              Anuluj
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div className={styles.mobileCards}>
+            {team.map((member) => {
+              const locked = viewerRole === "boss" && member.role === "admin";
+              const pending =
+                teamPending?.userId === member.userId ? teamPending.role : null;
+              const saving = teamUpdating === member.userId;
+              return (
+                <article key={member.userId}>
+                  <h3>{member.name || member.email || member.userId}</h3>
+                  {member.name && member.email && <p>{member.email}</p>}
+                  {locked ? (
+                    <span className={styles.activeStatus}>
+                      <ShieldCheck size={12} /> Admin
+                    </span>
+                  ) : (
+                    <>
+                      <label className={wstyles.selectBox}>
+                        <span className={wstyles.srOnly}>Rola</span>
+                        <select
+                          value={pending ?? member.role}
+                          disabled={saving}
+                          onChange={(event) =>
+                            onStagePendingRole(
+                              member.userId,
+                              event.target.value as "admin" | "boss" | "user",
+                            )
+                          }
+                        >
+                          <option value="user">User (pracownik)</option>
+                          <option value="boss">Boss (kierownik/szef)</option>
+                          {viewerRole === "admin" && <option value="admin">Admin</option>}
+                        </select>
+                        <ChevronDown size={16} />
+                      </label>
+                      {pending && pending !== member.role && (
+                        <span className={styles.mobileRowActions}>
+                          <button
+                            type="button"
+                            className={wstyles.primaryButton}
+                            disabled={saving}
+                            onClick={() => onConfirmRole(member.userId, pending)}
+                          >
+                            {saving ? "Zapisuję…" : "Zatwierdź"}
+                          </button>
+                          <button
+                            type="button"
+                            className={wstyles.secondaryButton}
+                            disabled={saving}
+                            onClick={onCancelRole}
+                          >
+                            Anuluj
+                          </button>
+                        </span>
+                      )}
+                    </>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+          {team.length === 0 && <div className={styles.empty}>Brak kont w zespole.</div>}
+        </section>
+      )}
 
       {addOpen && (
         <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="employee-add-title">
