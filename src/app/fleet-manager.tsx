@@ -11,6 +11,7 @@ export type FleetVehicle = {
   registration: string;
   customer: string;
   assignedAt: string;
+  validTo?: string;
 };
 
 type FleetVehicleDetail = FleetVehicle & {
@@ -18,7 +19,7 @@ type FleetVehicleDetail = FleetVehicle & {
   customerTaxId?: string;
 };
 
-const headerAliases: Record<keyof Omit<FleetVehicle, "id">, string[]> = {
+const headerAliases: Record<keyof Omit<FleetVehicle, "id" | "validTo">, string[]> = {
   brand: ["marka", "brand", "manufacturer", "producent"],
   model: ["model", "vehiclemodel", "modelpojazdu"],
   registration: ["nrrej", "nrrejestracyjny", "numerrejestracyjny", "registration", "registrationnumber", "plate"],
@@ -45,7 +46,7 @@ function splitDelimited(line: string, delimiter: string) {
   return cells;
 }
 
-function findColumn(headers: string[], field: keyof Omit<FleetVehicle, "id">) {
+function findColumn(headers: string[], field: keyof Omit<FleetVehicle, "id" | "validTo">) {
   return headers.findIndex((header) => headerAliases[field].includes(normalize(header)));
 }
 
@@ -101,6 +102,10 @@ function formatDate(value: string) {
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+function formatValidTo(value: string | undefined) {
+  return value ? formatDate(value) : "—";
+}
+
 export default function FleetManager({ importOpen, onCloseImport }: { importOpen: boolean; onCloseImport: () => void }) {
   const [vehicles, setVehicles] = useState<FleetVehicleDetail[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +125,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     customerEmail: "",
     customerTaxId: "",
     assignedAt: new Date().toISOString().slice(0, 16),
+    validTo: "",
   });
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
@@ -128,7 +134,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
 
   function openAddVehicle() {
     setEditingRegistration(null);
-    setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16) });
+    setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16), validTo: "" });
     setManualError(null);
     setManualOpen(true);
   }
@@ -143,6 +149,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       customerEmail: vehicle.customerEmail ?? "",
       customerTaxId: vehicle.customerTaxId ?? "",
       assignedAt: vehicle.assignedAt ? vehicle.assignedAt.slice(0, 16) : new Date().toISOString().slice(0, 16),
+      validTo: vehicle.validTo ? vehicle.validTo.slice(0, 16) : "",
     });
     setManualError(null);
     setManualOpen(true);
@@ -228,6 +235,10 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       setManualError("Uzupełnij wszystkie pola.");
       return;
     }
+    if (manualForm.validTo && manualForm.validTo <= manualForm.assignedAt) {
+      setManualError("Data końca umowy musi być późniejsza niż data początku.");
+      return;
+    }
     setManualSaving(true);
     setManualError(null);
     try {
@@ -242,12 +253,13 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
           customerEmail: manualForm.customerEmail.trim(),
           customerTaxId: manualForm.customerTaxId.trim(),
           assignedAt: manualForm.assignedAt,
+          validTo: manualForm.validTo,
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Nie udało się zapisać pojazdu.");
       await loadVehicles();
-      setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16) });
+      setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16), validTo: "" });
       setEditingRegistration(null);
       setManualOpen(false);
     } catch (reason) {
@@ -290,8 +302,8 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
 
     <section className={styles.fleetCard}>
       <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><div className={styles.headerActions}><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label><button type="button" className={styles.addVehicleButton} onClick={openAddVehicle}><Plus size={17} />Dodaj pojazd</button></div></div>
-      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Umowa od dnia</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={vehicle.customer === "Flota wewnętrzna" ? styles.unassignedStatus : styles.activeStatus}>{vehicle.customer === "Flota wewnętrzna" ? "Bez przypisania" : "Przypisany"}</span></td><td className={styles.rowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
-      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.mobileCardRight}><span className={vehicle.customer === "Flota wewnętrzna" ? styles.unassignedStatus : styles.activeStatus}>{vehicle.customer === "Flota wewnętrzna" ? "Bez przypisania" : "Przypisany"}</span><span className={styles.mobileRowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></span></span></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Umowa od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
+      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Umowa od dnia</th><th>Umowa do dnia</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td>{formatValidTo(vehicle.validTo)}</td><td><span className={vehicle.customer === "Flota wewnętrzna" ? styles.unassignedStatus : styles.activeStatus}>{vehicle.customer === "Flota wewnętrzna" ? "Bez przypisania" : "Przypisany"}</span></td><td className={styles.rowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.mobileCardRight}><span className={vehicle.customer === "Flota wewnętrzna" ? styles.unassignedStatus : styles.activeStatus}>{vehicle.customer === "Flota wewnętrzna" ? "Bez przypisania" : "Przypisany"}</span><span className={styles.mobileRowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></span></span></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Umowa od {formatDate(vehicle.assignedAt)} do {formatValidTo(vehicle.validTo)}</small></article>)}</div>
       {loading && <div className={styles.empty}>Ładowanie floty…</div>}
       {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
       {!loading && !loadError && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
@@ -307,6 +319,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
         <label>E-mail klienta<input type="email" value={manualForm.customerEmail} onChange={(event) => setManualForm((current) => ({ ...current, customerEmail: event.target.value }))} placeholder="klient@firma.pl" /></label>
         <label>NIP / PESEL<input value={manualForm.customerTaxId} onChange={(event) => setManualForm((current) => ({ ...current, customerTaxId: event.target.value }))} placeholder="Opcjonalnie" /></label>
         <label>Umowa od dnia<input type="datetime-local" value={manualForm.assignedAt} onChange={(event) => setManualForm((current) => ({ ...current, assignedAt: event.target.value }))} /><small className={styles.fieldHint}>Data rozpoczęcia przypisania — może być z przeszłości.</small></label>
+        <label>Umowa do dnia (opcjonalnie)<input type="datetime-local" value={manualForm.validTo} min={manualForm.assignedAt} onChange={(event) => setManualForm((current) => ({ ...current, validTo: event.target.value }))} /><small className={styles.fieldHint}>Zostaw puste, jeśli umowa nie ma jeszcze ustalonego końca — dopasowywanie mandatów po dacie zdarzenia zadziała poprawnie w obu przypadkach.</small></label>
       </div>
       {manualError && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można zapisać pojazdu</strong><small>{manualError}</small></span></div>}
       <footer><button className={styles.cancel} onClick={() => setManualOpen(false)}>Anuluj</button><button className={styles.confirm} disabled={manualSaving} onClick={addVehicle}>{manualSaving ? "Zapisuję…" : editingRegistration ? "Zapisz zmiany" : "Dodaj pojazd"}</button></footer>

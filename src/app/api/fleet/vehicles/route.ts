@@ -18,11 +18,21 @@ type AssignmentRow = {
   vehicle_id: string;
   customer_id: string;
   valid_from: string;
+  valid_to: string | null;
 };
 type CustomerRow = { id: string; name: string; email?: string; tax_id?: string };
 
 function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
+}
+
+// vehicle_assignment_no_overlap (a GiST exclusion constraint) is the thing
+// actually guaranteeing no vehicle is double-booked across two customers at
+// once — surface it as a real explanation instead of a generic 502 when it
+// fires, since setting/extending an end date is exactly the kind of edit
+// that can newly overlap a later assignment that already exists.
+function isOverlapViolation(detail: string) {
+  return detail.includes("23P01") || detail.includes("vehicle_assignment_no_overlap");
 }
 
 export async function GET(request: Request) {
@@ -48,8 +58,14 @@ export async function GET(request: Request) {
     );
   const vehicles = (await vehiclesResponse.json()) as VehicleRow[];
 
+  // "Current" used to mean "open-ended" (valid_to is null). Now that an
+  // assignment can have a planned end date, current has to mean "covers
+  // this instant" instead — otherwise a vehicle whose contract has a known
+  // end date would show its (former) customer forever, and one whose
+  // contract hasn't started yet would show it too early.
+  const nowIso = new Date().toISOString();
   const assignmentsResponse = await fetch(
-    `${url}/rest/v1/vehicle_assignments?select=vehicle_id,customer_id,valid_from&organization_id=eq.${member.organizationId}&valid_to=is.null&order=valid_from.desc`,
+    `${url}/rest/v1/vehicle_assignments?select=vehicle_id,customer_id,valid_from,valid_to&organization_id=eq.${member.organizationId}&valid_from=lte.${encodeURIComponent(nowIso)}&or=(valid_to.is.null,valid_to.gt.${encodeURIComponent(nowIso)})&order=valid_from.desc`,
     { headers, cache: "no-store" },
   );
   const assignments = assignmentsResponse.ok
@@ -89,6 +105,7 @@ export async function GET(request: Request) {
       customerEmail: customer?.email ?? "",
       customerTaxId: customer?.tax_id ?? "",
       assignedAt: assignment?.valid_from ?? "",
+      validTo: assignment?.valid_to ?? "",
     };
   });
   return NextResponse.json({ vehicles: result });
@@ -110,6 +127,21 @@ export async function POST(request: Request) {
   if (!brand || !model || !registration || !customerName || !assignedAt || Number.isNaN(assignedAt.valueOf()))
     return NextResponse.json(
       { error: "Uzupełnij wszystkie pola." },
+      { status: 422 },
+    );
+  // Optional planned end of the agreement — leaving it blank keeps the
+  // existing open-ended behavior (closed later, automatically, whenever the
+  // next assignment for this vehicle starts).
+  const validToRaw = text(body?.validTo, 40);
+  const validTo = validToRaw ? new Date(validToRaw) : null;
+  if (validToRaw && Number.isNaN(validTo?.valueOf()))
+    return NextResponse.json(
+      { error: "Nieprawidłowa data końca umowy." },
+      { status: 422 },
+    );
+  if (validTo && validTo.valueOf() <= assignedAt.valueOf())
+    return NextResponse.json(
+      { error: "Data końca umowy musi być późniejsza niż data początku." },
       { status: 422 },
     );
   const { url, secretKey } = getSupabaseServerEnv();
@@ -221,22 +253,76 @@ export async function POST(request: Request) {
     );
 
   // vehicle_assignments has an exclusion constraint forbidding overlapping
-  // date ranges per vehicle. If an open assignment already exists, update it
-  // in place instead of closing + re-inserting — closing an assignment at
-  // the exact instant it started (e.g. re-saving without changing the date)
-  // would create a zero-width/duplicate range and violate the constraint.
-  const existingAssignmentResponse = await fetch(
-    `${url}/rest/v1/vehicle_assignments?select=id,customer_id,valid_from&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_to=is.null&limit=1`,
-    { headers, cache: "no-store" },
-  );
-  const existingAssignments = existingAssignmentResponse.ok
-    ? ((await existingAssignmentResponse.json()) as Array<{ id: string; customer_id: string; valid_from: string }>)
+  // date ranges per vehicle. Two lookups, not one, now that an assignment
+  // can already have a planned end date at creation time:
+  //  - "same start" finds the row this form submission is actually editing
+  //    (same vehicle, identical valid_from), whether or not it already has
+  //    an end date. Filtering by valid_to=is.null here would miss any
+  //    assignment that already has a defined end and cause this edit to be
+  //    misread as a brand-new, overlapping assignment instead.
+  //  - "open" finds a still-ongoing (no end date) assignment that needs to
+  //    be auto-closed because a genuinely different assignment is starting
+  //    now — unaffected by the above, and deliberately still scoped to
+  //    valid_to=is.null: an assignment that already has a planned end
+  //    doesn't need auto-closing, it already knows when it ends.
+  const [sameStartResponse, openResponse] = await Promise.all([
+    fetch(
+      `${url}/rest/v1/vehicle_assignments?select=id,customer_id,valid_to&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_from=eq.${encodeURIComponent(assignedAtIso)}&limit=1`,
+      { headers, cache: "no-store" },
+    ),
+    fetch(
+      `${url}/rest/v1/vehicle_assignments?select=id,valid_from&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_to=is.null&limit=1`,
+      { headers, cache: "no-store" },
+    ),
+  ]);
+  const sameStartRows = sameStartResponse.ok
+    ? ((await sameStartResponse.json()) as Array<{ id: string; customer_id: string; valid_to: string | null }>)
     : [];
-  const currentAssignment = existingAssignments[0] ?? null;
-  const sameAssignment = currentAssignment
-    && currentAssignment.customer_id === customerId
-    && new Date(currentAssignment.valid_from).valueOf() === assignedAt.valueOf();
-  if (currentAssignment && !sameAssignment && assignedAt <= new Date(currentAssignment.valid_from))
+  const assignmentAtThisStart = sameStartRows[0] ?? null;
+  const sameAssignment = assignmentAtThisStart && assignmentAtThisStart.customer_id === customerId;
+  const validToIso = validTo ? validTo.toISOString() : null;
+
+  if (sameAssignment) {
+    // Editing the assignment that's already in place (same vehicle, same
+    // customer, same start) — only its end date can have changed. Compare
+    // as dates, not raw strings: Postgres's "+00:00" and JS's toISOString()
+    // "Z" suffix represent the same instant but never compare equal as text.
+    const storedValidTo = assignmentAtThisStart.valid_to
+      ? new Date(assignmentAtThisStart.valid_to).valueOf()
+      : null;
+    const nextValidTo = validTo ? validTo.valueOf() : null;
+    if (storedValidTo !== nextValidTo) {
+      const updateResponse = await fetch(
+        `${url}/rest/v1/vehicle_assignments?id=eq.${assignmentAtThisStart.id}&organization_id=eq.${member.organizationId}`,
+        {
+          method: "PATCH",
+          headers: { ...jsonHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ valid_to: validToIso }),
+        },
+      );
+      if (!updateResponse.ok) {
+        const detail = await updateResponse.text().catch(() => "");
+        console.error("vehicle_assignments valid_to update failed", updateResponse.status, detail);
+        return NextResponse.json(
+          {
+            error: isOverlapViolation(detail)
+              ? "Ten pojazd ma już przypisanie w tym okresie. Skróć zakres albo popraw kolidujące przypisanie."
+              : "Nie udało się zapisać daty końca umowy.",
+          },
+          { status: isOverlapViolation(detail) ? 422 : 502 },
+        );
+      }
+    }
+    return NextResponse.json({
+      vehicle: { id: vehicleId, brand, model, registration, customer: customerName, assignedAt: assignedAtIso, validTo: validToIso ?? "" },
+    });
+  }
+
+  const existingOpenAssignments = openResponse.ok
+    ? ((await openResponse.json()) as Array<{ id: string; valid_from: string }>)
+    : [];
+  const openAssignment = existingOpenAssignments[0] ?? null;
+  if (openAssignment && assignedAt <= new Date(openAssignment.valid_from))
     return NextResponse.json(
       { error: "Nowe przypisanie musi zaczynać się po rozpoczęciu obecnego najmu. Historię wsteczną popraw przez dedykowaną edycję." },
       { status: 422 },
@@ -244,9 +330,9 @@ export async function POST(request: Request) {
 
   // Do not rewrite an open assignment: the history is needed to identify the
   // correct customer on the mandate event timestamp.
-  if (currentAssignment && !sameAssignment) {
+  if (openAssignment) {
     const closeResponse = await fetch(
-      `${url}/rest/v1/vehicle_assignments?id=eq.${currentAssignment.id}&organization_id=eq.${member.organizationId}`,
+      `${url}/rest/v1/vehicle_assignments?id=eq.${openAssignment.id}&organization_id=eq.${member.organizationId}`,
       {
         method: "PATCH",
         headers: { ...jsonHeaders, Prefer: "return=minimal" },
@@ -257,11 +343,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Nie udało się zamknąć poprzedniego przypisania auta." }, { status: 502 });
   }
 
-  if (sameAssignment)
-    return NextResponse.json({
-      vehicle: { id: vehicleId, brand, model, registration, customer: customerName, assignedAt: assignedAtIso },
-    });
-
   const assignmentResponse = await fetch(`${url}/rest/v1/vehicle_assignments`, {
         method: "POST",
         headers: { ...jsonHeaders, Prefer: "return=minimal" },
@@ -270,6 +351,7 @@ export async function POST(request: Request) {
           vehicle_id: vehicleId,
           customer_id: customerId,
           valid_from: assignedAtIso,
+          valid_to: validToIso,
           source: "manual",
           created_by: member.userId,
         }),
@@ -277,6 +359,11 @@ export async function POST(request: Request) {
   if (!assignmentResponse.ok) {
     const detail = await assignmentResponse.text().catch(() => "");
     console.error("vehicle_assignments write failed", assignmentResponse.status, detail);
+    if (isOverlapViolation(detail))
+      return NextResponse.json(
+        { error: "Ten pojazd ma już przypisanie w tym okresie. Skróć zakres albo popraw kolidujące przypisanie." },
+        { status: 422 },
+      );
     return NextResponse.json(
       { error: "Nie udało się przypisać klienta do pojazdu." },
       { status: 502 },
@@ -291,6 +378,7 @@ export async function POST(request: Request) {
       registration,
       customer: customerName,
       assignedAt: assignedAtIso,
+      validTo: validToIso ?? "",
     },
   });
 }
