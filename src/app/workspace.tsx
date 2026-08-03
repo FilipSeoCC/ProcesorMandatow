@@ -1541,7 +1541,7 @@ export default function MandatyWorkspace() {
             onCancelRole={() => setTeamPending(null)}
           />
         ) : activeView === "routes" ? (
-          <DeliveryPlanner />
+          <DeliveryPlanner employeeLabel={employeeLabel} />
         ) : activeView === "branches" ? (
           <Branches />
         ) : activeView === "bugs" ? (
