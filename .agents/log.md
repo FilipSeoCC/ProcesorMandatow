@@ -350,3 +350,23 @@ Sender-name detection alone wasn't enough — `POSTAL_CODE`/`ADDRESS_START`/`SEC
 Verified with hand-written sample DE/FR/ES letter text (not a real scanned document) via `node --experimental-strip-types` — sender name detected correctly in all three. Two known rough edges on the **address** field only, not chased further since address was never the actual ask: German addresses that suffix the street type onto the name (e.g. "Rathausplatz" — doesn't match `ADDRESS_START`'s prefix-only patterns) won't get their street line; a French "CS" mailbox reference number can be mistaken for the postal code if it happens to be 5 digits (matched "41101" in "CS 41101" instead of the real "77000 Rennes"). Both are the same tier of best-effort imprecision the Polish path already accepts — flag if it ever matters enough to fix properly.
 
 `tsc --noEmit` and eslint both clean.
+
+## 2026-08-03 — Claude — Optional agreement end date for vehicle assignments (commit `79b05e2`)
+
+Filip's ask: the customer/vehicle assignment needs a planned end date, not just a start, so a mandate matched by OCR event time lands on the right customer even in the gap before someone gets around to creating the next booking. Proposed a plan first (per his request), got explicit sign-off, then implemented.
+
+**Investigated before writing any code — turned out to be a smaller job than it looked.** `vehicle_assignments.valid_to` and the GiST exclusion constraint already existed in the schema, and `matchVehicleCustomer` already queried the bounded range correctly (`valid_from <= event AND (valid_to IS NULL OR valid_to > event)`). Zero changes needed in the matching logic. The actual gap was purely on the input side — no UI/API path ever *set* `valid_to` except automatically, retroactively, when the next assignment for that vehicle started.
+
+- **`fleet-manager.tsx`**: new optional "Umowa do dnia" field next to "Umowa od dnia," in both add and edit. Blank keeps today's open-ended behavior exactly as before.
+- **`POST /api/fleet/vehicles`**: accepts optional `validTo`, validates it's after the start, passes it through on insert, and — this is the part that needed real care — supports editing it on an assignment that already exists.
+- **`GET /api/fleet/vehicles`**: "current assignment" used to mean "open-ended" (`valid_to IS NULL`). Wrong on both ends now that an assignment can have a real end date or a future start — changed to "covers this instant" (`valid_from <= now <= valid_to`). Intentional side effect Filip signed off on explicitly: a vehicle whose contract already ended now correctly shows as unassigned instead of showing its former customer forever.
+- Exclusion-constraint violations (`23P01` / `vehicle_assignment_no_overlap`) now surface as a clear Polish 422 instead of a generic 502, on both the insert path and the new edit-in-place path.
+
+**Filip explicitly asked for a self-audit before shipping, given how central this table is** ("to jest ważne żeby nic nam się tu nie wysypało") — caught two real issues doing that, before any of this reached production:
+
+1. **The one that actually mattered**: the "find the assignment to edit" lookup filtered `valid_to IS NULL`. Editing the end date of an assignment that *already had one set* (e.g. extending a bounded contract) would miss it entirely, fall through to the insert path, and hit the exclusion constraint against its own prior version of itself — surfacing as a confusing "this vehicle already has an assignment in this period" error while trying to edit exactly that assignment. Fixed by splitting into two independent lookups: "same start" (finds the row actually being edited — same vehicle, identical `valid_from`, regardless of whether it already has an end) and "open" (finds one that needs auto-closing because a genuinely *different* assignment is starting now — stays scoped to `valid_to IS NULL`, since a bounded assignment already knows its own end and needs no auto-closing).
+2. Minor: comparing stored vs. new `valid_to` as raw strings — Postgres's `+00:00` and JS's `toISOString()` `Z` suffix represent the same instant but never compare equal as text, which would've fired a harmless-but-unnecessary PATCH on every re-save. Switched to comparing `Date` values.
+
+Verified unaffected, no changes made: `matchVehicleCustomer`, CSV/XML import (never sends `validTo`, so it's unaffected), vehicle soft-delete (`DELETE /api/fleet/vehicles/[id]` only auto-closes *open* assignments — a bounded one's own end date is irrelevant once the vehicle is removed from the UI anyway).
+
+`tsc --noEmit`, eslint, and a full `npm run build` all clean before push.

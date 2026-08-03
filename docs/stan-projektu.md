@@ -67,6 +67,8 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 - Cykliczne dogrywanie dopasowań dla spraw, które nie trafiły za pierwszym razem
   (`/api/internal/documents/rematch`).
 - Flota i pracownicy — realny zapis do bazy, edycja, import CSV/XML floty.
+  Przypisanie klienta do pojazdu ma opcjonalną datę końca umowy (nie tylko
+  początku) — puste pole = umowa otwarta jak dotychczas.
 - Generowanie wezwania PDF, pakietu do pracownika i pisma do urzędu.
 - Log audytowy, zgłaszanie błędów ze zrzutem ekranu (stały przycisk w lewym
   dolnym rogu, nad kartą konta — dla każdej roli; lista/panel zgłoszeń w
@@ -246,11 +248,18 @@ szczegóły i status wdrożenia.
 Nie odkrywaj ich drugi raz.
 
 **`vehicle_assignments` ma ograniczenie wykluczające nakładające się zakresy dat
-per pojazd** (GiST) plus `check(valid_to > valid_from)`. Zmiana przypisania musi
-zamknąć stary wiersz i wstawić nowy — **nigdy nadpisywać w miejscu**, bo to
-kasuje historię, na której opiera się całe dopasowywanie mandatów wstecz. Z tego
+per pojazd** (GiST) plus `check(valid_to > valid_from)`. Zmiana przypisania na
+**innego klienta lub inną datę startu** musi zamknąć stary wiersz i wstawić
+nowy — **nigdy nadpisywać `valid_from`/`customer_id` w miejscu**, bo to kasuje
+historię, na której opiera się całe dopasowywanie mandatów wstecz. Z tego
 samego powodu **nie zrównoleglaj importu CSV floty** — równoległe żądania dla
 tego samego pojazdu biją się o to ograniczenie.
+
+Wyjątek od powyższego (dodany 2026-08-03, przemyślany, nie przypadkowy): edycja
+**tylko `valid_to`** na przypisaniu, które już jest tym samym wierszem (ten sam
+pojazd, ten sam klient, ta sama data startu), aktualizuje ten wiersz w miejscu
+— bo to nie zmienia tożsamości przypisania, tylko dopisuje/koryguje jego
+planowany koniec. Zobacz `POST /api/fleet/vehicles` i `.agents/log.md`.
 
 **Tablice rejestracyjne normalizuj przez `normalizePlate()`** z
 `vehicle-match.ts`. Porównanie dokładnym stringiem gdziekolwiek indziej tworzy
