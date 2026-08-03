@@ -247,6 +247,20 @@ szczegóły i status wdrożenia.
 
 Nie odkrywaj ich drugi raz.
 
+**Nigdy nie identyfikuj "które przypisanie edytuję" po polach
+(`vehicle_id`+`valid_from`+`customer_id`) — tylko po `id`.** Dopasowanie po
+polach kosztowało dwa realne błędy 2026-08-03 (patrz `.agents/log.md`):
+formularz edycji ma tylko precyzję minutową, a import CSV zapisuje surową
+wartość z komórki (może mieć sekundy) — więc dopasowanie po dacie zawodzi przy
+edycji. Gorzej: bez filtra na `valid_to`, dopasowanie po polach może cicho
+trafić w dawno zamknięty, historyczny wiersz o tym samym kliencie i dacie
+startu, patchując go, podczas gdy realne aktualne przypisanie zostaje
+nietknięte — bez żadnego błędu. `GET /api/fleet/vehicles` zwraca teraz
+`assignmentId`; formularz edycji przekazuje go z powrotem; `POST` szuka po nim,
+nie po polach. Ścieżka bez `assignmentId` (dodawanie, import CSV) nadal istnieje,
+ale ma dodatkowy warunek: dopasuje tylko wiersz otwarty albo aktywny teraz,
+nigdy definitywnie zamknięty.
+
 **`vehicle_assignments` ma ograniczenie wykluczające nakładające się zakresy dat
 per pojazd** (GiST) plus `check(valid_to > valid_from)`. Zmiana przypisania na
 **innego klienta lub inną datę startu** musi zamknąć stary wiersz i wstawić
