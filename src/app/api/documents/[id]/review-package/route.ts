@@ -41,7 +41,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const recipientName = [member.firstName, member.lastName].filter(Boolean).join(" ").trim();
 
   const { url, secretKey } = getSupabaseServerEnv();
-  if (!url || !secretKey) return NextResponse.json({ error: "Supabase nie jest skonfigurowany." }, { status: 503 });
+  if (!url || !secretKey) return NextResponse.json({ error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." }, { status: 503 });
   const headers = adminHeaders(secretKey);
   const documentResponse = await fetch(`${url}/rest/v1/mandate_documents?select=case_number,registration_number,event_at,letter_date,sender,responsible_name,responsible_email,confirmed_at,review_package_sent_at&id=eq.${encodeURIComponent(id)}&organization_id=eq.${member.organizationId}`, { headers, cache: "no-store" });
   const documents = (await documentResponse.json().catch(() => [])) as DocumentRow[];

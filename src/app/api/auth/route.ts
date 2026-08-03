@@ -134,7 +134,7 @@ export async function PATCH(request: Request) {
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
   const response = await fetch(`${url}/auth/v1/user`, {
@@ -202,7 +202,7 @@ export async function POST(request: Request) {
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
 

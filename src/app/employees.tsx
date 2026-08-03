@@ -168,6 +168,13 @@ export default function Employees({
 
   async function removeEmployee(id: string) {
     if (removingId) return;
+    const employee = employees.find((item) => item.id === id);
+    if (
+      !window.confirm(
+        `Usunąć pracownika ${employee?.name ?? ""}? Tej operacji nie można cofnąć.`,
+      )
+    )
+      return;
     setRemovingId(id);
     try {
       const response = await fetch(`/api/fleet/drivers/${id}`, { method: "DELETE" });

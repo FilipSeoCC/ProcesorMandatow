@@ -86,7 +86,7 @@ export async function PATCH(
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
 
@@ -144,7 +144,7 @@ export async function DELETE(
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
   const headers = adminHeaders(secretKey);

@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import {
+  Eye,
+  EyeOff,
   FileText,
   LoaderCircle,
   LockKeyhole,
@@ -17,11 +19,13 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   function switchMode(next: "sign-in" | "sign-up" | "reset") {
     setMode(next);
     setError(null);
     setMessage(null);
+    setShowPassword(false);
   }
 
   useEffect(() => {
@@ -63,6 +67,12 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         return;
       }
       setMessage(result.message);
+      return;
+    }
+
+    if (mode === "sign-up" && form.get("password") !== form.get("confirmPassword")) {
+      setSubmitting(false);
+      setError("Hasła nie są identyczne.");
       return;
     }
 
@@ -169,15 +179,47 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           {mode !== "reset" && (
             <label>
               Hasło
-              <input
-                name="password"
-                type="password"
-                required
-                minLength={mode === "sign-up" ? 12 : 8}
-                autoComplete={
-                  mode === "sign-in" ? "current-password" : "new-password"
-                }
-              />
+              <div className={styles.passwordField}>
+                <input
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={mode === "sign-up" ? 12 : 8}
+                  autoComplete={
+                    mode === "sign-in" ? "current-password" : "new-password"
+                  }
+                />
+                <button
+                  type="button"
+                  className={styles.passwordToggle}
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Ukryj hasło" : "Pokaż hasło"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </label>
+          )}
+          {mode === "sign-up" && (
+            <label>
+              Powtórz hasło
+              <div className={styles.passwordField}>
+                <input
+                  name="confirmPassword"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  minLength={12}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  className={styles.passwordToggle}
+                  onClick={() => setShowPassword((current) => !current)}
+                  aria-label={showPassword ? "Ukryj hasło" : "Pokaż hasło"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
             </label>
           )}
           {mode === "sign-up" && <p className={styles.hint}>Minimum 12 znaków.</p>}

@@ -119,8 +119,10 @@ function authHeaders() {
 
 export default function DeliveryPlanner({
   employeeLabel,
+  currentUserName,
 }: {
   employeeLabel?: (userId?: string | null) => string;
+  currentUserName?: string;
 }) {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [deliveriesLoading, setDeliveriesLoading] = useState(true);
@@ -343,6 +345,13 @@ export default function DeliveryPlanner({
   }
 
   async function removeDelivery(id: string) {
+    const delivery = deliveries.find((item) => item.id === id);
+    if (
+      !window.confirm(
+        `Usunąć dostawę dla ${delivery?.customer ?? "tego klienta"}? Tej operacji nie można cofnąć.`,
+      )
+    )
+      return;
     const response = await fetch(`/api/routes/deliveries/${id}`, {
       method: "DELETE",
       headers: authHeaders(),
@@ -548,7 +557,7 @@ export default function DeliveryPlanner({
       className={`${styles.planner} ${plan ? styles.plannerWithActions : ""}`}
     >
       <section className={styles.hero}>
-        <span>Plan dnia · Wadim</span>
+        <span>Plan dnia{currentUserName ? ` · ${currentUserName}` : ""}</span>
         <h1>Dostawy samochodów</h1>
         <p>
           Wybierz auta z placu, a system ułoży możliwie krótką kolejność dostaw.

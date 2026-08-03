@@ -30,7 +30,7 @@ export async function GET(request: Request) {
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
   // With the 3-role model every member (admin/boss/user) does full case
@@ -59,35 +59,35 @@ export async function GET(request: Request) {
   const documents = (await response.json()) as DocumentRow[];
   const items = await Promise.all(
     documents.map(async (document) => {
-      const firstPage = [...document.mandate_document_pages].sort(
+      const sortedPages = [...document.mandate_document_pages].sort(
         (a, b) => a.page_number - b.page_number,
-      )[0];
-      let previewUrl: string | null = null;
-      if (firstPage) {
-        const signed = await fetch(
-          `${url}/storage/v1/object/sign/mandate-documents/${firstPage.storage_path}`,
-          {
-            method: "POST",
-            headers: {
-              ...adminHeaders(secretKey),
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ expiresIn: 600 }),
-            signal: AbortSignal.timeout(8_000),
-          },
-        );
-        if (signed.ok) {
-          const body = (await signed.json()) as {
-            signedURL?: string;
-            signedUrl?: string;
-          };
-          const path = body.signedURL || body.signedUrl;
-          if (path)
-            previewUrl = path.startsWith("http")
-              ? path
-              : `${url}/storage/v1${path}`;
-        }
-      }
+      );
+      const previewPages = (
+        await Promise.all(
+          sortedPages.map(async (page) => {
+            const signed = await fetch(
+              `${url}/storage/v1/object/sign/mandate-documents/${page.storage_path}`,
+              {
+                method: "POST",
+                headers: {
+                  ...adminHeaders(secretKey),
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ expiresIn: 600 }),
+                signal: AbortSignal.timeout(8_000),
+              },
+            );
+            if (!signed.ok) return null;
+            const body = (await signed.json()) as {
+              signedURL?: string;
+              signedUrl?: string;
+            };
+            const path = body.signedURL || body.signedUrl;
+            if (!path) return null;
+            return path.startsWith("http") ? path : `${url}/storage/v1${path}`;
+          }),
+        )
+      ).filter((page): page is string => Boolean(page));
       const authority = detectAuthorityFromOcr(
         document.ocr_text,
         document.sender,
@@ -99,7 +99,8 @@ export async function GET(request: Request) {
         authority_address: authority.address || null,
         authority_confidence: authority.confidence,
         authority_source: authority.source,
-        previewUrl,
+        previewUrl: previewPages[0] ?? null,
+        previewPages,
       };
     }),
   );

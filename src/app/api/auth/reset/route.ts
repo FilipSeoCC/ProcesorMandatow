@@ -16,7 +16,7 @@ export async function POST(request: Request) {
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
 
@@ -54,7 +54,7 @@ export async function PUT(request: Request) {
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
 

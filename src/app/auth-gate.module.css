@@ -104,6 +104,30 @@
 .card input:focus {
   border-color: #2563eb;
 }
+.passwordField {
+  position: relative;
+}
+.passwordField input {
+  padding-right: 44px;
+}
+.passwordToggle {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+}
+.passwordToggle:hover {
+  background: #f1f5f9;
+}
 .consentLabel {
   display: flex !important;
   flex-direction: row;

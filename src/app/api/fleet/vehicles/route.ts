@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
   const headers = adminHeaders(secretKey);
@@ -115,7 +115,7 @@ export async function POST(request: Request) {
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey)
     return NextResponse.json(
-      { error: "Supabase nie jest skonfigurowany." },
+      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
   const headers = adminHeaders(secretKey);
