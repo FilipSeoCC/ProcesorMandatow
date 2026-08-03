@@ -12,6 +12,7 @@ export type FleetVehicle = {
   customer: string;
   assignedAt: string;
   validTo?: string;
+  assignmentId?: string;
 };
 
 type FleetVehicleDetail = FleetVehicle & {
@@ -19,7 +20,7 @@ type FleetVehicleDetail = FleetVehicle & {
   customerTaxId?: string;
 };
 
-const headerAliases: Record<keyof Omit<FleetVehicle, "id" | "validTo">, string[]> = {
+const headerAliases: Record<keyof Omit<FleetVehicle, "id" | "validTo" | "assignmentId">, string[]> = {
   brand: ["marka", "brand", "manufacturer", "producent"],
   model: ["model", "vehiclemodel", "modelpojazdu"],
   registration: ["nrrej", "nrrejestracyjny", "numerrejestracyjny", "registration", "registrationnumber", "plate"],
@@ -46,7 +47,7 @@ function splitDelimited(line: string, delimiter: string) {
   return cells;
 }
 
-function findColumn(headers: string[], field: keyof Omit<FleetVehicle, "id" | "validTo">) {
+function findColumn(headers: string[], field: keyof Omit<FleetVehicle, "id" | "validTo" | "assignmentId">) {
   return headers.findIndex((header) => headerAliases[field].includes(normalize(header)));
 }
 
@@ -126,6 +127,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     customerTaxId: "",
     assignedAt: new Date().toISOString().slice(0, 16),
     validTo: "",
+    assignmentId: "",
   });
   const [manualError, setManualError] = useState<string | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
@@ -134,7 +136,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
 
   function openAddVehicle() {
     setEditingRegistration(null);
-    setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16), validTo: "" });
+    setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16), validTo: "", assignmentId: "" });
     setManualError(null);
     setManualOpen(true);
   }
@@ -150,6 +152,11 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       customerTaxId: vehicle.customerTaxId ?? "",
       assignedAt: vehicle.assignedAt ? vehicle.assignedAt.slice(0, 16) : new Date().toISOString().slice(0, 16),
       validTo: vehicle.validTo ? vehicle.validTo.slice(0, 16) : "",
+      // Lets the backend find this exact assignment by identity instead of
+      // guessing from vehicle+date+customer — see route.ts for why that
+      // guessing broke (CSV-imported sub-minute timestamps, stale historical
+      // rows with a coincidentally matching customer+start).
+      assignmentId: vehicle.assignmentId ?? "",
     });
     setManualError(null);
     setManualOpen(true);
@@ -254,12 +261,13 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
           customerTaxId: manualForm.customerTaxId.trim(),
           assignedAt: manualForm.assignedAt,
           validTo: manualForm.validTo,
+          assignmentId: manualForm.assignmentId,
         }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Nie udało się zapisać pojazdu.");
       await loadVehicles();
-      setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16), validTo: "" });
+      setManualForm({ brand: "", model: "", registration: "", customer: "", customerEmail: "", customerTaxId: "", assignedAt: new Date().toISOString().slice(0, 16), validTo: "", assignmentId: "" });
       setEditingRegistration(null);
       setManualOpen(false);
     } catch (reason) {

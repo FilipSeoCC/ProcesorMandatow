@@ -30,12 +30,22 @@ export async function DELETE(
   // via a pre-emptive delete before finding out the vehicle delete itself
   // would fail anyway. Marking the vehicle removed keeps all history intact
   // and sidesteps both FK constraints entirely.
+  //
+  // Close every assignment that's ACTIVE right now, not just open-ended
+  // ones: assignments can carry a planned end date since the "Umowa do
+  // dnia" feature, so a vehicle can be deleted mid-contract while its
+  // active assignment already has a future valid_to. valid_to=is.null
+  // alone would miss that row entirely, leaving it (and the customer it
+  // points at) valid for OCR matching on a vehicle no longer in the fleet.
+  // A not-yet-started future assignment (valid_from in the future) is
+  // deliberately left untouched — out of scope here.
+  const nowIso = new Date().toISOString();
   const closeAssignments = await fetch(
-    `${url}/rest/v1/vehicle_assignments?organization_id=eq.${member.organizationId}&vehicle_id=eq.${encodeURIComponent(id)}&valid_to=is.null`,
+    `${url}/rest/v1/vehicle_assignments?organization_id=eq.${member.organizationId}&vehicle_id=eq.${encodeURIComponent(id)}&valid_from=lte.${encodeURIComponent(nowIso)}&or=(valid_to.is.null,valid_to.gt.${encodeURIComponent(nowIso)})`,
     {
       method: "PATCH",
       headers: { ...jsonHeaders, Prefer: "return=minimal" },
-      body: JSON.stringify({ valid_to: new Date().toISOString() }),
+      body: JSON.stringify({ valid_to: nowIso }),
     },
   );
   if (!closeAssignments.ok)

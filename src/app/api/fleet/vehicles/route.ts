@@ -15,6 +15,7 @@ type VehicleRow = {
   registration_number: string;
 };
 type AssignmentRow = {
+  id: string;
   vehicle_id: string;
   customer_id: string;
   valid_from: string;
@@ -65,7 +66,7 @@ export async function GET(request: Request) {
   // contract hasn't started yet would show it too early.
   const nowIso = new Date().toISOString();
   const assignmentsResponse = await fetch(
-    `${url}/rest/v1/vehicle_assignments?select=vehicle_id,customer_id,valid_from,valid_to&organization_id=eq.${member.organizationId}&valid_from=lte.${encodeURIComponent(nowIso)}&or=(valid_to.is.null,valid_to.gt.${encodeURIComponent(nowIso)})&order=valid_from.desc`,
+    `${url}/rest/v1/vehicle_assignments?select=id,vehicle_id,customer_id,valid_from,valid_to&organization_id=eq.${member.organizationId}&valid_from=lte.${encodeURIComponent(nowIso)}&or=(valid_to.is.null,valid_to.gt.${encodeURIComponent(nowIso)})&order=valid_from.desc`,
     { headers, cache: "no-store" },
   );
   const assignments = assignmentsResponse.ok
@@ -106,6 +107,7 @@ export async function GET(request: Request) {
       customerTaxId: customer?.tax_id ?? "",
       assignedAt: assignment?.valid_from ?? "",
       validTo: assignment?.valid_to ?? "",
+      assignmentId: assignment?.id ?? "",
     };
   });
   return NextResponse.json({ vehicles: result });
@@ -122,6 +124,17 @@ export async function POST(request: Request) {
   const customerName = text(body?.customer, 200);
   const customerEmail = text(body?.customerEmail, 200);
   const customerTaxId = text(body?.customerTaxId, 20);
+  // Set by the edit form (openEditVehicle) so the assignment being edited is
+  // found by identity, not by guessing from vehicle_id+valid_from+customer.
+  // That guess broke in two ways: sub-minute precision lost when a
+  // datetime-local input round-trips a value that was originally created
+  // with second-level precision (e.g. via CSV import), and — more
+  // seriously — silently matching an unrelated CLOSED historical row that
+  // happens to share the same customer+start, patching its valid_to while
+  // leaving the vehicle's actual current assignment untouched. Absent
+  // (add-vehicle flow, CSV/XML import) falls back to the previous heuristic
+  // exactly as before.
+  const assignmentId = text(body?.assignmentId, 60);
   const assignedAtRaw = text(body?.assignedAt, 40);
   const assignedAt = assignedAtRaw ? new Date(assignedAtRaw) : null;
   if (!brand || !model || !registration || !customerName || !assignedAt || Number.isNaN(assignedAt.valueOf()))
@@ -255,19 +268,33 @@ export async function POST(request: Request) {
   // vehicle_assignments has an exclusion constraint forbidding overlapping
   // date ranges per vehicle. Two lookups, not one, now that an assignment
   // can already have a planned end date at creation time:
-  //  - "same start" finds the row this form submission is actually editing
-  //    (same vehicle, identical valid_from), whether or not it already has
-  //    an end date. Filtering by valid_to=is.null here would miss any
-  //    assignment that already has a defined end and cause this edit to be
-  //    misread as a brand-new, overlapping assignment instead.
+  //  - "same start" finds the row this form submission is actually editing.
+  //    When the edit form supplied assignmentId, look it up by id — exact
+  //    identity, immune to the two ways matching by valid_from used to
+  //    break: sub-minute precision lost when a datetime-local input
+  //    round-trips a value originally created with second-level precision
+  //    (e.g. CSV import), and silently matching an unrelated CLOSED
+  //    historical row that happens to share the same customer+start.
+  //    Without an assignmentId (add-vehicle flow, CSV/XML import, which
+  //    never has one to send), fall back to the original valid_from match.
   //  - "open" finds a still-ongoing (no end date) assignment that needs to
   //    be auto-closed because a genuinely different assignment is starting
   //    now — unaffected by the above, and deliberately still scoped to
   //    valid_to=is.null: an assignment that already has a planned end
   //    doesn't need auto-closing, it already knows when it ends.
+  // Without an assignmentId (CSV/XML import, which never has one), the
+  // valid_from match is also restricted to rows that are still active or
+  // open (not already closed) — otherwise a re-imported row whose date
+  // happens to equal some unrelated, long-closed historical assignment's
+  // start would get silently "matched" and have that dead row's valid_to
+  // patched, while the vehicle's real current assignment stays untouched
+  // with no error raised anywhere.
+  const nowIso = new Date().toISOString();
   const [sameStartResponse, openResponse] = await Promise.all([
     fetch(
-      `${url}/rest/v1/vehicle_assignments?select=id,customer_id,valid_to&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_from=eq.${encodeURIComponent(assignedAtIso)}&limit=1`,
+      assignmentId
+        ? `${url}/rest/v1/vehicle_assignments?select=id,customer_id,valid_from,valid_to&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&id=eq.${encodeURIComponent(assignmentId)}&limit=1`
+        : `${url}/rest/v1/vehicle_assignments?select=id,customer_id,valid_from,valid_to&organization_id=eq.${member.organizationId}&vehicle_id=eq.${vehicleId}&valid_from=eq.${encodeURIComponent(assignedAtIso)}&or=(valid_to.is.null,valid_to.gt.${encodeURIComponent(nowIso)})&limit=1`,
       { headers, cache: "no-store" },
     ),
     fetch(
@@ -276,7 +303,7 @@ export async function POST(request: Request) {
     ),
   ]);
   const sameStartRows = sameStartResponse.ok
-    ? ((await sameStartResponse.json()) as Array<{ id: string; customer_id: string; valid_to: string | null }>)
+    ? ((await sameStartResponse.json()) as Array<{ id: string; customer_id: string; valid_from: string; valid_to: string | null }>)
     : [];
   const assignmentAtThisStart = sameStartRows[0] ?? null;
   const sameAssignment = assignmentAtThisStart && assignmentAtThisStart.customer_id === customerId;
@@ -318,29 +345,73 @@ export async function POST(request: Request) {
     });
   }
 
-  const existingOpenAssignments = openResponse.ok
-    ? ((await openResponse.json()) as Array<{ id: string; valid_from: string }>)
-    : [];
-  const openAssignment = existingOpenAssignments[0] ?? null;
-  if (openAssignment && assignedAt <= new Date(openAssignment.valid_from))
-    return NextResponse.json(
-      { error: "Nowe przypisanie musi zaczynać się po rozpoczęciu obecnego najmu. Historię wsteczną popraw przez dedykowaną edycję." },
-      { status: 422 },
-    );
-
-  // Do not rewrite an open assignment: the history is needed to identify the
-  // correct customer on the mandate event timestamp.
-  if (openAssignment) {
-    const closeResponse = await fetch(
-      `${url}/rest/v1/vehicle_assignments?id=eq.${openAssignment.id}&organization_id=eq.${member.organizationId}`,
+  if (assignmentId && assignmentAtThisStart) {
+    // A specific row was identified (the edit form sent its id) but the
+    // customer differs — a genuine reassignment, not an edit. Close that
+    // exact row instead of falling back to the generic "any open
+    // assignment" guess below: this correctly handles reassigning a
+    // BOUNDED assignment too, which that heuristic can't see at all
+    // (it's scoped to valid_to IS NULL).
+    if (assignedAt.valueOf() <= new Date(assignmentAtThisStart.valid_from).valueOf())
+      return NextResponse.json(
+        { error: "Nowa data startu musi być późniejsza niż początek zamykanego przypisania." },
+        { status: 422 },
+      );
+    const closeKnownResponse = await fetch(
+      `${url}/rest/v1/vehicle_assignments?id=eq.${assignmentAtThisStart.id}&organization_id=eq.${member.organizationId}`,
       {
         method: "PATCH",
         headers: { ...jsonHeaders, Prefer: "return=minimal" },
         body: JSON.stringify({ valid_to: assignedAtIso }),
       },
     );
-    if (!closeResponse.ok)
-      return NextResponse.json({ error: "Nie udało się zamknąć poprzedniego przypisania auta." }, { status: 502 });
+    if (!closeKnownResponse.ok) {
+      const detail = await closeKnownResponse.text().catch(() => "");
+      console.error("vehicle_assignments close-by-id failed", closeKnownResponse.status, detail);
+      return NextResponse.json(
+        {
+          error: isOverlapViolation(detail)
+            ? "Ten pojazd ma już przypisanie w tym okresie. Skróć zakres albo popraw kolidujące przypisanie."
+            : "Nie udało się zamknąć poprzedniego przypisania auta.",
+        },
+        { status: isOverlapViolation(detail) ? 422 : 502 },
+      );
+    }
+  } else {
+    const existingOpenAssignments = openResponse.ok
+      ? ((await openResponse.json()) as Array<{ id: string; valid_from: string }>)
+      : [];
+    const openAssignment = existingOpenAssignments[0] ?? null;
+    if (openAssignment && assignedAt <= new Date(openAssignment.valid_from))
+      return NextResponse.json(
+        { error: "Nowe przypisanie musi zaczynać się po rozpoczęciu obecnego najmu. Historię wsteczną popraw przez dedykowaną edycję." },
+        { status: 422 },
+      );
+
+    // Do not rewrite an open assignment: the history is needed to identify
+    // the correct customer on the mandate event timestamp.
+    if (openAssignment) {
+      const closeResponse = await fetch(
+        `${url}/rest/v1/vehicle_assignments?id=eq.${openAssignment.id}&organization_id=eq.${member.organizationId}`,
+        {
+          method: "PATCH",
+          headers: { ...jsonHeaders, Prefer: "return=minimal" },
+          body: JSON.stringify({ valid_to: assignedAtIso }),
+        },
+      );
+      if (!closeResponse.ok) {
+        const detail = await closeResponse.text().catch(() => "");
+        console.error("vehicle_assignments close failed", closeResponse.status, detail);
+        return NextResponse.json(
+          {
+            error: isOverlapViolation(detail)
+              ? "Ten pojazd ma już przypisanie w tym okresie. Skróć zakres albo popraw kolidujące przypisanie."
+              : "Nie udało się zamknąć poprzedniego przypisania auta.",
+          },
+          { status: isOverlapViolation(detail) ? 422 : 502 },
+        );
+      }
+    }
   }
 
   const assignmentResponse = await fetch(`${url}/rest/v1/vehicle_assignments`, {
