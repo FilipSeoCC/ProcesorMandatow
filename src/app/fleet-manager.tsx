@@ -88,6 +88,14 @@ function parseXml(text: string): FleetVehicle[] {
   }));
 }
 
+function pluralizePojazd(count: number) {
+  if (count === 1) return "pojazd";
+  const lastTwo = count % 100;
+  const lastDigit = count % 10;
+  if (lastDigit >= 2 && lastDigit <= 4 && !(lastTwo >= 12 && lastTwo <= 14)) return "pojazdy";
+  return "pojazdów";
+}
+
 function formatDate(value: string) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("pl-PL", { dateStyle: "medium", timeStyle: "short" }).format(date);
@@ -160,6 +168,11 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
   }, []);
 
   const filtered = useMemo(() => vehicles.filter((vehicle) => `${vehicle.brand} ${vehicle.model} ${vehicle.registration} ${vehicle.customer}`.toLowerCase().includes(query.toLowerCase())), [query, vehicles]);
+  const lastUpdatedLabel = useMemo(() => {
+    const timestamps = vehicles.map((vehicle) => new Date(vehicle.assignedAt).getTime()).filter((time) => !Number.isNaN(time));
+    if (!timestamps.length) return "—";
+    return formatDate(new Date(Math.max(...timestamps)).toISOString());
+  }, [vehicles]);
   const invalidRows = preview.filter((row) => !row.brand || !row.model || !row.registration || !row.customer || !row.assignedAt || Number.isNaN(new Date(row.assignedAt).getTime()));
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
@@ -201,7 +214,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     }
     await loadVehicles();
     setImporting(false);
-    if (failed > 0) setError(`Nie udało się zaimportować ${failed} z ${preview.length} pojazdów.`);
+    if (failed > 0) setError(`Nie udało się zaimportować ${failed} z ${preview.length} ${preview.length === 1 ? "pojazdu" : "pojazdów"}.`);
     setImported(preview.length - failed);
     setPreview([]); setFileName("");
   }
@@ -246,6 +259,13 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
 
   async function removeVehicle(id: string) {
     if (removingId) return;
+    const vehicle = vehicles.find((item) => item.id === id);
+    if (
+      !window.confirm(
+        `Usunąć pojazd ${vehicle?.registration ?? ""}? Tej operacji nie można cofnąć.`,
+      )
+    )
+      return;
     setRemovingId(id);
     try {
       const response = await fetch(`/api/fleet/vehicles/${id}`, { method: "DELETE" });
@@ -265,13 +285,13 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     <section className={styles.summary} aria-label="Podsumowanie floty">
       <article><span className={styles.summaryIcon}><CarFront size={21} /></span><div><small>Wszystkie pojazdy</small><strong>{vehicles.length}</strong></div></article>
       <article><span className={styles.summaryIcon}><CheckCircle2 size={21} /></span><div><small>Przypisane do klientów</small><strong>{vehicles.filter((item) => item.customer !== "Flota wewnętrzna").length}</strong></div></article>
-      <article><span className={styles.summaryIcon}><FileSpreadsheet size={21} /></span><div><small>Ostatnia aktualizacja</small><strong>Dzisiaj</strong></div></article>
+      <article><span className={styles.summaryIcon}><FileSpreadsheet size={21} /></span><div><small>Ostatnia aktualizacja</small><strong>{lastUpdatedLabel}</strong></div></article>
     </section>
 
     <section className={styles.fleetCard}>
       <div className={styles.cardHeader}><div><h2>Kartoteka pojazdów</h2><p>Aktualne przypisanie samochodów do klientów</p></div><div className={styles.headerActions}><label className={styles.search}><Search size={18} /><span className={styles.srOnly}>Szukaj pojazdu</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Marka, nr rej. lub klient" /></label><button type="button" className={styles.addVehicleButton} onClick={openAddVehicle}><Plus size={17} />Dodaj pojazd</button></div></div>
-      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Umowa od dnia</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={styles.activeStatus}>Aktywny</span></td><td className={styles.rowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
-      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.mobileCardRight}><span className={styles.activeStatus}>Aktywny</span><span className={styles.mobileRowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></span></span></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Umowa od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
+      <div className={styles.tableWrap}><table><thead><tr><th>Pojazd</th><th>Numer rejestracyjny</th><th>Aktualny klient</th><th>Umowa od dnia</th><th>Status</th><th /></tr></thead><tbody>{filtered.map((vehicle) => <tr key={vehicle.id}><td><strong>{vehicle.brand}</strong><span>{vehicle.model}</span></td><td><code>{vehicle.registration}</code></td><td>{vehicle.customer}</td><td>{formatDate(vehicle.assignedAt)}</td><td><span className={vehicle.customer === "Flota wewnętrzna" ? styles.unassignedStatus : styles.activeStatus}>{vehicle.customer === "Flota wewnętrzna" ? "Bez przypisania" : "Przypisany"}</span></td><td className={styles.rowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={16} /></button></td></tr>)}</tbody></table></div>
+      <div className={styles.mobileCards}>{filtered.map((vehicle) => <article key={vehicle.id}><div><code>{vehicle.registration}</code><span className={styles.mobileCardRight}><span className={vehicle.customer === "Flota wewnętrzna" ? styles.unassignedStatus : styles.activeStatus}>{vehicle.customer === "Flota wewnętrzna" ? "Bez przypisania" : "Przypisany"}</span><span className={styles.mobileRowActions}><button type="button" className={styles.editVehicle} onClick={() => openEditVehicle(vehicle)} aria-label={`Edytuj pojazd ${vehicle.registration}`}>Edytuj</button><button type="button" className={styles.removeVehicle} disabled={removingId === vehicle.id} onClick={() => removeVehicle(vehicle.id)} aria-label={`Usuń pojazd ${vehicle.registration}`}><Trash2 size={15} /></button></span></span></div><h3>{vehicle.brand} {vehicle.model}</h3><p>{vehicle.customer}</p><small>Umowa od {formatDate(vehicle.assignedAt)}</small></article>)}</div>
       {loading && <div className={styles.empty}>Ładowanie floty…</div>}
       {!loading && loadError && <div className={styles.empty}>{loadError}</div>}
       {!loading && !loadError && filtered.length === 0 && <div className={styles.empty}>Nie znaleziono pojazdów.</div>}
@@ -297,9 +317,9 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
       <p className={styles.intro}>Wymagane pola: <strong>marka, model, nr rej., klient oraz data i czas przekazania</strong>.</p>
       <div className={styles.importActions}><label><input type="file" accept=".csv,text/csv,.xml,application/xml,text/xml" onChange={handleImportFile} /><span><Upload size={23} /><strong>Wybierz CSV lub XML</strong><small>Maksymalnie 5 MB</small></span></label><button onClick={downloadTemplate}><Download size={19} /><span><strong>Pobierz szablon CSV</strong><small>Gotowe nazwy kolumn</small></span></button></div>
       {error && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można zaimportować pliku</strong><small>{error}</small></span></div>}
-      {imported !== null && <div className={styles.success}><CheckCircle2 size={18} />Zaimportowano {imported} pojazdów.</div>}
+      {imported !== null && <div className={styles.success}><CheckCircle2 size={18} />Zaimportowano {imported} {pluralizePojazd(imported)}.</div>}
       {preview.length > 0 && <div className={styles.preview}><div className={styles.previewHeader}><div><h3>Podgląd importu</h3><span>{fileName}</span></div><strong>{preview.length} wierszy</strong></div>{invalidRows.length > 0 && <div className={styles.error}><CircleAlert size={18} /><span><strong>{invalidRows.length} niekompletnych wierszy</strong><small>Uzupełnij wymagane pola w pliku i załaduj go ponownie.</small></span></div>}<div className={styles.previewTable}><table><thead><tr><th>Marka / model</th><th>Nr rej.</th><th>Klient</th><th>Data i czas</th></tr></thead><tbody>{preview.slice(0, 5).map((row) => <tr key={row.id}><td>{row.brand} {row.model}</td><td>{row.registration}</td><td>{row.customer}</td><td>{row.assignedAt}</td></tr>)}</tbody></table></div></div>}
-      <footer><button className={styles.cancel} onClick={onCloseImport}>Anuluj</button><button className={styles.confirm} disabled={preview.length === 0 || invalidRows.length > 0 || importing} onClick={confirmImport}>{importing ? "Importuję…" : `Importuj ${preview.length > 0 ? `${preview.length} pojazdów` : "flotę"}`}</button></footer>
+      <footer><button className={styles.cancel} onClick={onCloseImport}>Anuluj</button><button className={styles.confirm} disabled={preview.length === 0 || invalidRows.length > 0 || importing} onClick={confirmImport}>{importing ? "Importuję…" : `Importuj ${preview.length > 0 ? `${preview.length} ${pluralizePojazd(preview.length)}` : "flotę"}`}</button></footer>
     </section></div>}
   </>;
 }

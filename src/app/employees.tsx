@@ -38,9 +38,9 @@ function normalize(value: string) {
 
 const statusClass: Record<Employee["status"], string> = {
   "Dostępny": styles.activeStatus,
-  "W trasie": styles.activeStatus,
-  "Urlop": styles.activeStatus,
-  "Nieaktywny": styles.activeStatus,
+  "W trasie": styles.statusOnRoute,
+  "Urlop": styles.statusOnLeave,
+  "Nieaktywny": styles.unassignedStatus,
 };
 
 const emptyForm = {
@@ -168,6 +168,13 @@ export default function Employees({
 
   async function removeEmployee(id: string) {
     if (removingId) return;
+    const employee = employees.find((item) => item.id === id);
+    if (
+      !window.confirm(
+        `Usunąć pracownika ${employee?.name ?? ""}? Tej operacji nie można cofnąć.`,
+      )
+    )
+      return;
     setRemovingId(id);
     try {
       const response = await fetch(`/api/fleet/drivers/${id}`, { method: "DELETE" });

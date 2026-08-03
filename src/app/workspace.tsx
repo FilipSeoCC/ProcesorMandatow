@@ -65,6 +65,7 @@ type CaseItem = {
   authorityAddress?: string | null;
   authorityConfidence?: number;
   authoritySource?: "ocr" | "stored" | "none";
+  extractionConfidence?: Record<string, number>;
   eventAt: string;
   letterDate?: string | null;
   receivedAt: string;
@@ -73,6 +74,7 @@ type CaseItem = {
   customer: string;
   agreement: string;
   previewUrl?: string | null;
+  previewPages?: string[];
   ocrStatus?: string;
   ocrText?: string | null;
   responsibleName?: string;
@@ -134,6 +136,31 @@ async function prepareCameraUpload(file: File, displayName: string) {
 function plausibleName(value: string) {
   const trimmed = value.trim();
   return trimmed.length >= 2 && /^[\p{L} .'-]+$/u.test(trimmed) && /\p{L}/u.test(trimmed);
+}
+
+const OCR_FIELD_KEYS = ["registrationNumber", "eventAt", "caseNumber", "sender"] as const;
+
+// Real OCR stats when extraction_confidence is on the document, otherwise a
+// presence-based estimate for legacy/demo cases that never went through OCR.
+function ocrFieldStats(item: CaseItem) {
+  const confidence = item.extractionConfidence;
+  if (confidence) {
+    const values = OCR_FIELD_KEYS.map((key) => confidence[key] ?? 0);
+    const recognized = values.filter((value) => value > 0).length;
+    const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+    return { recognized, total: values.length, confidencePercent: Math.round(average * 100) };
+  }
+  const presence = [
+    Boolean(item.plate) && item.plate !== "OCR…",
+    Boolean(item.eventAt) && item.eventAt !== "Oczekuje na OCR",
+    Boolean(item.caseNumber),
+    Boolean(item.sender) && item.sender !== "Nowy dokument z telefonu",
+  ];
+  return {
+    recognized: presence.filter(Boolean).length,
+    total: presence.length,
+    confidencePercent: null as number | null,
+  };
 }
 
 function plausibleAuthorityLabel(value: string) {
@@ -379,6 +406,7 @@ export default function MandatyWorkspace() {
   const [draft, setDraft] = useState({
     plate: "",
     eventAt: "",
+    caseNumber: "",
     sender: "",
     responsibleName: "",
     responsibleTaxId: "",
@@ -400,6 +428,7 @@ export default function MandatyWorkspace() {
     setDraft({
       plate: selected.plate === "OCR…" ? "" : selected.plate,
       eventAt: selected.eventAt === "Oczekuje na OCR" ? "" : selected.eventAt,
+      caseNumber: selected.caseNumber ?? "",
       sender:
         selected.sender === "Nowy dokument z telefonu" ? "" : selected.sender,
       responsibleName: selected.responsibleName ?? "",
@@ -580,7 +609,9 @@ export default function MandatyWorkspace() {
         authority_address?: string | null;
         authority_confidence?: number;
         authority_source?: "ocr" | "stored" | "none";
+        extraction_confidence?: Record<string, number>;
         previewUrl: string | null;
+        previewPages?: string[];
         ocr_text: string | null;
         responsible_name: string;
         responsible_tax_id: string;
@@ -611,6 +642,7 @@ export default function MandatyWorkspace() {
       authorityAddress: document.authority_address ?? null,
       authorityConfidence: document.authority_confidence ?? 0,
       authoritySource: document.authority_source ?? "none",
+      extractionConfidence: document.extraction_confidence,
       eventAt: document.event_at || "Oczekuje na OCR",
       letterDate: document.letter_date,
       receivedAt: new Date(document.created_at).toLocaleString("pl-PL", {
@@ -633,6 +665,7 @@ export default function MandatyWorkspace() {
       customer: document.responsible_name || "—",
       agreement: "—",
       previewUrl: document.previewUrl,
+      previewPages: document.previewPages ?? [],
       ocrStatus: document.status,
       ocrText: document.ocr_text,
       responsibleName: document.responsible_name,
@@ -838,6 +871,7 @@ export default function MandatyWorkspace() {
         body: JSON.stringify({
           registrationNumber: draft.plate,
           eventAt: draft.eventAt,
+          caseNumber: draft.caseNumber,
           sender: draft.sender,
           responsibleName: draft.responsibleName,
           responsibleTaxId: draft.responsibleTaxId,
@@ -1541,7 +1575,7 @@ export default function MandatyWorkspace() {
             onCancelRole={() => setTeamPending(null)}
           />
         ) : activeView === "routes" ? (
-          <DeliveryPlanner employeeLabel={employeeLabel} />
+          <DeliveryPlanner employeeLabel={employeeLabel} currentUserName={accountDisplayName(account)} />
         ) : activeView === "branches" ? (
           <Branches />
         ) : activeView === "bugs" ? (
@@ -1913,7 +1947,7 @@ export default function MandatyWorkspace() {
                 </div>
 
                 <div className={styles.reviewGrid}>
-                  <DocumentPreview src={selected.previewUrl} />
+                  <DocumentPreview pages={selected.previewPages} fallbackSrc={selected.previewUrl} />
                   <div className={styles.dataPane}>
                   <div className={styles.dataPaneScroll}>
                     <div className={styles.analysisBanner}>
@@ -1933,7 +1967,7 @@ export default function MandatyWorkspace() {
                       </span>
                       <small>
                         {!selected.ocrStatus
-                          ? "Rozpoznano 8 z 9 pól"
+                          ? `Rozpoznano ${ocrFieldStats(selected).recognized} z ${ocrFieldStats(selected).total} pól`
                           : pendingOcrStatuses.has(selected.ocrStatus)
                             ? "Trwa rozpoznawanie dokumentu…"
                             : selected.ocrStatus === "ready"
@@ -1964,7 +1998,11 @@ export default function MandatyWorkspace() {
                           <p className={styles.eyebrow}>Dane zdarzenia</p>
                           <h3>Odczyt z dokumentu</h3>
                         </div>
-                        <span className={styles.confidence}>92% pewności</span>
+                        {ocrFieldStats(selected).confidencePercent !== null && (
+                          <span className={styles.confidence}>
+                            {ocrFieldStats(selected).confidencePercent}% pewności
+                          </span>
+                        )}
                       </div>
                       <div className={styles.formGrid}>
                         <Field
@@ -1988,7 +2026,13 @@ export default function MandatyWorkspace() {
                           }}
                           confident
                         />
-                        <Field label="Numer sprawy" value={selected.caseNumber} />
+                        <Field
+                          label="Numer sprawy"
+                          value={draft.caseNumber}
+                          onChange={(value) =>
+                            setDraft((current) => ({ ...current, caseNumber: value }))
+                          }
+                        />
                         <Field
                           label="Nadawca"
                           value={draft.sender}
@@ -3004,16 +3048,35 @@ function Field({
   );
 }
 
-function DocumentPreview({ src }: { src?: string | null }) {
+function DocumentPreview({
+  pages,
+  fallbackSrc,
+}: {
+  pages?: string[];
+  fallbackSrc?: string | null;
+}) {
+  const [pageIndex, setPageIndex] = useState(0);
+  const resolvedPages = pages?.length ? pages : fallbackSrc ? [fallbackSrc] : [];
+  const totalPages = resolvedPages.length;
+  const currentPage = Math.min(pageIndex, Math.max(totalPages - 1, 0));
+  const src = resolvedPages[currentPage] ?? null;
   return (
     <div className={styles.documentPane}>
       <div className={styles.documentToolbar}>
-        <span>Strona 1 z 2</span>
+        <span>{totalPages ? `Strona ${currentPage + 1} z ${totalPages}` : "Brak podglądu"}</span>
         <div>
-          <button aria-label="Poprzednia strona">
+          <button
+            aria-label="Poprzednia strona"
+            disabled={currentPage <= 0}
+            onClick={() => setPageIndex((current) => Math.max(0, current - 1))}
+          >
             <ChevronLeft size={17} />
           </button>
-          <button aria-label="Następna strona">
+          <button
+            aria-label="Następna strona"
+            disabled={currentPage >= totalPages - 1}
+            onClick={() => setPageIndex((current) => Math.min(totalPages - 1, current + 1))}
+          >
             <ChevronRight size={17} />
           </button>
         </div>
@@ -3025,7 +3088,7 @@ function DocumentPreview({ src }: { src?: string | null }) {
           <img
             className={styles.scanImage}
             src={src}
-            alt="Pierwsza strona zeskanowanego dokumentu"
+            alt={`Strona ${currentPage + 1} zeskanowanego dokumentu`}
           />
         ) : (
           <article
