@@ -36,6 +36,7 @@ export async function POST(request: Request) {
       error_message?: string;
       results?: Array<{
         formatted_address?: string;
+        partial_match?: boolean;
         geometry?: { location?: { lat?: number; lng?: number } };
       }>;
     };
@@ -86,10 +87,16 @@ export async function POST(request: Request) {
         { status: 502 },
       );
     }
+    // Google returns status:"OK" even for a typo'd address if it can guess
+    // what you meant — partial_match:true is the only signal that happened.
+    // Without surfacing it, a mistyped street silently resolves to whatever
+    // Google guessed, and the delivery gets planned against the wrong point
+    // with no indication anything was uncertain.
     return NextResponse.json({
       latitude: location.lat,
       longitude: location.lng,
       formattedAddress: first?.formatted_address ?? address,
+      partialMatch: Boolean(first?.partial_match),
     });
   } catch (error) {
     console.error("Geocoding failed", error);

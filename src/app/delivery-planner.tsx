@@ -141,6 +141,11 @@ export default function DeliveryPlanner({
   });
   const [geocoding, setGeocoding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [uncertainGeocode, setUncertainGeocode] = useState<{
+    latitude: number;
+    longitude: number;
+    formattedAddress: string;
+  } | null>(null);
   const [routeDirty, setRouteDirty] = useState(false);
   const [pendingAction, setPendingAction] = useState<
     "complete" | "failed" | null
@@ -158,7 +163,9 @@ export default function DeliveryPlanner({
   const currentStop = ordered.find((item) => item.status === "planned");
   const routeStarted = ordered.some((item) => item.status !== "planned");
 
-  async function loadDeliveries() {
+  // Returns the fresh list on success so callers that need to verify a
+  // specific id landed (addDelivery) don't have to re-read stale state.
+  async function loadDeliveries(): Promise<Delivery[] | null> {
     setDeliveriesLoading(true);
     try {
       const response = await fetch("/api/routes/deliveries", {
@@ -166,14 +173,17 @@ export default function DeliveryPlanner({
         cache: "no-store",
       });
       const data = await response.json().catch(() => ({}));
-      if (response.ok) {
-        setDeliveries(data.deliveries ?? []);
-        setSelected((current) =>
-          current.filter((id) =>
-            (data.deliveries ?? []).some((item: Delivery) => item.id === id),
-          ),
-        );
+      if (!response.ok) {
+        // Previously silent on failure — the list stayed stale with no
+        // indication anything was wrong, which is how "3 wybrane auta" with
+        // an empty, un-refreshed list underneath became possible.
+        setError(data.error || "Nie udało się odświeżyć listy dostaw.");
+        return null;
       }
+      const fresh: Delivery[] = data.deliveries ?? [];
+      setDeliveries(fresh);
+      setSelected((current) => current.filter((id) => fresh.some((item) => item.id === id)));
+      return fresh;
     } finally {
       setDeliveriesLoading(false);
     }
@@ -257,23 +267,45 @@ export default function DeliveryPlanner({
     setGeocoding(true);
     setAddError(null);
     try {
-      const geocodeResponse = await fetch("/api/routes/geocode", {
-        method: "POST",
-        headers: authHeaders(),
-        body: JSON.stringify({ address }),
-      });
-      const geocodeData = await geocodeResponse.json();
-      if (!geocodeResponse.ok)
-        throw new Error(geocodeData.error || "Nie udało się znaleźć adresu.");
+      // A confirmed uncertain match skips re-geocoding and uses the address
+      // the user already approved in the confirmation step below.
+      let resolved = uncertainGeocode;
+      if (!resolved) {
+        const geocodeResponse = await fetch("/api/routes/geocode", {
+          method: "POST",
+          headers: authHeaders(),
+          body: JSON.stringify({ address }),
+        });
+        const geocodeData = await geocodeResponse.json();
+        if (!geocodeResponse.ok)
+          throw new Error(geocodeData.error || "Nie udało się znaleźć adresu.");
+        // Google returns status "OK" even for a typo'd address if it can
+        // guess what you meant — partialMatch is the only signal that
+        // happened. Stop here and make the user look at what it actually
+        // resolved to before planning a route around it.
+        if (geocodeData.partialMatch) {
+          setUncertainGeocode({
+            latitude: geocodeData.latitude,
+            longitude: geocodeData.longitude,
+            formattedAddress: geocodeData.formattedAddress,
+          });
+          return;
+        }
+        resolved = {
+          latitude: geocodeData.latitude,
+          longitude: geocodeData.longitude,
+          formattedAddress: geocodeData.formattedAddress || address,
+        };
+      }
       const createResponse = await fetch("/api/routes/deliveries", {
         method: "POST",
         headers: authHeaders(),
         body: JSON.stringify({
           vehicleId: addForm.vehicleId,
           customer,
-          address: geocodeData.formattedAddress || address,
-          latitude: geocodeData.latitude,
-          longitude: geocodeData.longitude,
+          address: resolved.formattedAddress,
+          latitude: resolved.latitude,
+          longitude: resolved.longitude,
           serviceMinutes,
           priority: Math.min(5, Math.max(1, priority || 3)),
         }),
@@ -281,8 +313,18 @@ export default function DeliveryPlanner({
       const createData = await createResponse.json().catch(() => ({}));
       if (!createResponse.ok)
         throw new Error(createData.error || "Nie udało się dodać dostawy.");
-      await loadDeliveries();
+      const fresh = await loadDeliveries();
+      // The refreshed list is the source of truth for what actually exists —
+      // trusting the create response alone let selected end up pointing at a
+      // delivery that, for whatever reason, wasn't actually there to select.
+      if (!fresh?.some((item) => item.id === createData.id)) {
+        setAddError(
+          "Dostawa została zapisana, ale nie pojawiła się na liście — odśwież stronę i sprawdź, zanim zaplanujesz trasę.",
+        );
+        return;
+      }
       setSelected((current) => [...current, createData.id]);
+      setUncertainGeocode(null);
       setAddForm({
         customer: "",
         vehicleId: "",
@@ -674,6 +716,7 @@ export default function DeliveryPlanner({
                 onClick={() => {
                   setAddOpen((current) => !current);
                   setAddError(null);
+                  setUncertainGeocode(null);
                 }}
               >
                 {addOpen ? <X size={16} /> : <Plus size={16} />}
@@ -733,15 +776,27 @@ export default function DeliveryPlanner({
                   Adres dostawy
                   <input
                     value={addForm.address}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      // Editing the address invalidates any pending
+                      // "is this really what you meant?" confirmation — don't
+                      // let a stale approved address survive an edit.
+                      setUncertainGeocode(null);
                       setAddForm((current) => ({
                         ...current,
                         address: event.target.value,
-                      }))
-                    }
+                      }));
+                    }}
                     placeholder="Ulica, numer, miasto"
                   />
                 </label>
+                {uncertainGeocode && (
+                  <p className={styles.addStopFormHint}>
+                    Google nie jest pewne tego adresu. Najbliższe dopasowanie:{" "}
+                    <strong>{uncertainGeocode.formattedAddress}</strong>. Sprawdź, czy to
+                    właściwe miejsce, zanim dodasz dostawę — kliknij przycisk poniżej ponownie,
+                    żeby je zatwierdzić, albo popraw adres powyżej.
+                  </p>
+                )}
                 <div className={styles.addStopRow}>
                   <label>
                     Czas obsługi (min)
@@ -786,7 +841,11 @@ export default function DeliveryPlanner({
                   ) : (
                     <Plus size={17} />
                   )}
-                  {geocoding ? "Wyszukuję adres…" : "Dodaj do listy"}
+                  {geocoding
+                    ? "Wyszukuję adres…"
+                    : uncertainGeocode
+                      ? "Potwierdź adres i dodaj"
+                      : "Dodaj do listy"}
                 </button>
               </div>
             )}
