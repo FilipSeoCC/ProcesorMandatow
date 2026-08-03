@@ -125,18 +125,54 @@ pismach, ale **nikt go nie przeszedł na prawdziwych dokumentach**. Bez tej
 liczby nie ma podstaw ani do wdrożenia, ani do rozmowy o cenie — cała wartość
 produktu opiera się na tym, że człowiek nie przepisuje danych ręcznie.
 
-### 4. Planer tras nie zapisuje nic do bazy
+### 4. ~~Planer tras nie zapisuje nic do bazy~~ — rozwiązane, ale ma otwarte luki (patrz niżej)
 
-`delivery-planner.tsx` trzyma wszystko w stanie lokalnym i `localStorage`. W
-interfejsie jest to nawet napisane wprost. Albo podpiąć do bazy, albo ukryć —
-zostawienie tak wprowadza użytkownika w błąd.
+`route_plans`/`route_stops`/`delivery_orders` to prawdziwe tabele (patrz
+`supabase/schema.sql`), planer jest w pełni podpięty pod bazę, jest historia
+tras (`/api/routes/plan/history` + `[id]`, ekran "Historia tras" w
+`delivery-planner.tsx`). To nie jest już otwarty temat.
 
-Ręczna zmiana kolejności przystanków (strzałki góra/dół) działa poprawnie —
-sprawdzone i potwierdzone 2026-08-02. Przycisk "Nawiguj" wcześniej wyglądał na
-zepsuty z innego powodu: `target="_blank"` na linku do Google Maps nic nie
-robi w trybie `standalone` PWA (`manifest.ts`) na iOS — usunięte.
+**Otwarte luki, zdiagnozowane 2026-08-03, nic jeszcze nie zaimplementowane:**
 
-### 5. Brakuje `RESEND_API_KEY` na produkcji
+Filip: pojazd nie powinien dać się wybrać do nowej dostawy, dopóki ma
+nierozwiązaną (kierowca nie potwierdził) poprzednią — i to jest ok, że przy
+braku wolnego pojazdu planer blokuje. Ale: (a) nic dziś faktycznie tego nie
+pilnuje po stronie serwera — `POST /api/routes/deliveries` przyjmie ten sam
+`vehicleId` drugi raz bez żadnego sprawdzenia, `GET /api/fleet/vehicles` nie
+zwraca informacji, że pojazd jest zajęty; (b) jeśli kierowca nigdy nie
+potwierdzi dostawy (`route_stops.status` zostaje `'planned'` na zawsze), auto
+utknie bez żadnego powiadomienia dla nikogo — trzeba nawigacyjny
+badge/przypomnienie; (c) **realny bug znaleziony przy analizie**: `GET/POST/DELETE
+/api/routes/plan` filtrują "aktywny plan" po `planned_for=eq.<dzisiaj>` — plan
+z wczoraj, który nie został dokończony (nadal ma `status='active'` i
+nierozwiązane stopy), staje się niewidoczny i niezarządzalny przez UI (nie
+pokaże się w GET, nie da się go superseded'ować przez "Zmień dostawy"), a jego
+pojazdy zostają zajęte bez żadnego sposobu na odblokowanie poza ręcznym SQL.
+Napraw przez usunięcie filtra `planned_for` z tych trzech miejsc — inwariant
+powinien być "jeden aktywny plan na organizację", nie "na dzień". `planned_for`
+zostaje jako metadana, nie jako klucz zapytania.
+(d) reorder (`move()` w `delivery-planner.tsx`) chowa strzałki góra/dół
+całkowicie po `routeStarted` (dowolny stop już rozwiązany) — trzeba pozwolić
+zmieniać kolejność **tylko wśród stopów `status==='planned'`**, trzymając
+rozwiązane (`delivered`/`failed`) na ich bezwzględnych pozycjach; istniejący
+RPC `reorder_route_stops` (`POST /api/routes/plan/reorder`) już przyjmuje
+pełną tablicę id, nie trzeba go zmieniać, tylko to, co UI do niego wysyła.
+(e) doklejenie nowej dostawy do **już aktywnego** planu bez resetowania całej
+trasy nie istnieje — dziś jedyna opcja w trakcie dnia to "Zmień dostawy", które
+kasuje/supersede'uje cały plan (`DELETE /api/routes/plan`); potrzebny osobny
+`POST /api/routes/plan/stops` doklejający jeden `route_stop` na koniec
+istniejącego aktywnego planu.
+
+Ręczna zmiana kolejności przystanków (strzałki góra/dół, dopóki trasa nie
+wystartowała) działa poprawnie — sprawdzone i potwierdzone 2026-08-02.
+Przycisk "Nawiguj" wcześniej wyglądał na zepsuty z innego powodu:
+`target="_blank"` na linku do Google Maps nic nie robi w trybie `standalone`
+PWA (`manifest.ts`) na iOS — usunięte.
+
+### 5. `RESEND_API_KEY` — świadomie zaparkowane (**nie zaczynaj od nowa bez pytania Filipa**)
+
+Filip nie ma domeny pocztowej. Zdecydował **2026-08-02, żeby to zaparkować**,
+nie próbować obejść.
 
 Sprawdzasz jednym żądaniem, bez logowania:
 
@@ -144,20 +180,33 @@ Sprawdzasz jednym żądaniem, bez logowania:
 curl -s https://procesor-mandatow.vercel.app/api/health
 ```
 
-Stan na 2026-08-02 (po dodaniu `CRON_SECRET` — `ocrQueueConfigured` jest już
-`true`; Filip ręcznie odpalił oba crony w panelu Vercela, `/api/internal/documents/rematch`
-zwrócił **200** — kolejka OCR i auto-dopasowanie faktycznie działają, nie tylko
-wyglądają na skonfigurowane):
+`emailConfigured: false` jest **oczekiwane** i zostaje tak, dopóki Filip nie
+zdecyduje inaczej. Wysyłka pakietu do pracownika (`review-package`) zwraca
+503, a oba maile rejestracyjne (`src/lib/account-emails.ts` —
+"dziękujemy za rejestrację" i "przyznano dostęp") po prostu **nie wysyłają
+się w ogóle i nie zgłaszają błędu** (funkcje `sendRegistrationReceivedEmail`/
+`sendRoleGrantedEmail` cicho wracają, gdy brakuje kluczy) — reszta flow
+(blokada logowania, nadanie roli) działa niezależnie od tego.
 
-- `emailConfigured: false` — brak `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
-  Wysyłka pakietu do pracownika (`review-package`) zwraca 503, a oba nowe
-  maile rejestracyjne (`src/lib/account-emails.ts` — "dziękujemy za
-  rejestrację" i "przyznano dostęp") po prostu **nie wysyłają się w ogóle i
-  nie zgłaszają błędu** (funkcje `sendRegistrationReceivedEmail`/
-  `sendRoleGrantedEmail` cicho wracają, gdy brakuje kluczy) — reszta flow
-  (blokada logowania, nadanie roli) działa niezależnie od tego. Trzeba
-  ustawić te dwie zmienne w Vercelu, żeby którakolwiek wysyłka mailem
-  faktycznie zadziałała.
+**Sprawdzone i odrzucone alternatywy — nie proponuj ich ponownie:**
+
+- ~~Edycja treści szablonu Supabase Auth "Confirm signup" bez SMTP~~ —
+  **niemożliwe**. Pole Subject/Body w panelu (Supabase/Vercel) jest
+  wyszarzone, dopóki nie skonfigurujesz custom SMTP. Współdzielony mailer
+  Supabase wysyła wyłącznie domyślną, angielską treść — nie da się
+  spersonalizować bez tego samego SMTP/domeny, którego próbujemy uniknąć.
+- ~~Nadużycie innego typu maila Supabase (np. reset hasła) jako powiadomienia
+  "przyznano dostęp"~~ — odrzucone: user klikający link trafiłby w
+  prawdziwy formularz zmiany hasła, nie w informację o dostępie. Myląca
+  ścieżka, nie wdrażać.
+- Żadnego sposobu wysłania załącznika (skan mandatu w `review-package`) bez
+  SMTP nie ma — to twarde ograniczenie Supabase Auth, nie kwestia konfiguracji.
+
+**Jeśli temat wróci**, realne opcje są tylko dwie: zostać przy domyślnym
+angielskim mailu Supabase (zero kosztu, brak polskiej treści), albo
+skonfigurować SMTP/Resend całościowo — nie ma pośredniej, darmowej ścieżki.
+Tania domena z pocztą w pakiecie (~30–60 zł/rok, np. home.pl/OVH) odblokowuje
+to jednym ruchem, gdy Filip zdecyduje się to zrobić.
 
 ### 6. ~~Schemat bazy trzeba wgrywać ręcznie~~ — rozwiązane 2026-08-02
 
@@ -228,10 +277,17 @@ Kolejność, którą uważam za właściwą:
 
 1. ~~Zapraszanie użytkowników i zarządzanie rolami~~ — zrobione 2026-08-02 (patrz wyżej).
 2. ~~`CRON_SECRET` w Vercelu~~ — ustawione i **zweryfikowane** 2026-08-02 (ręczne "Run" w panelu Cron Jobs, 200 w logach), kolejka OCR i auto-dopasowanie realnie działają.
-3. **`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu** — bez tego żadna wysyłka mailem (pakiet do pracownika, dwa maile rejestracyjne) nie działa.
+3. ~~`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu~~ — **zaparkowane 2026-08-02**, patrz punkt 5 wyżej. Nie odgrzewaj bez pytania Filipa.
 4. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
 5. **Testy `extractMandateFields`**.
-6. **Planer tras** — podpiąć do bazy albo ukryć.
+6. ~~Planer tras — podpiąć do bazy albo ukryć~~ — zrobione, patrz punkt 4 wyżej.
+7. **Planer tras: blokada zajętego pojazdu + przypomnienie dla kierowcy + edycja
+   trasy w trakcie dnia** — zdiagnozowane 2026-08-03, plan i konkretne miejsca w
+   kodzie opisane w punkcie 4 wyżej i w `.agents/log.md` (wpis z 2026-08-03).
+   Nic jeszcze nie zaimplementowane — zacznij tu, to jest kolejka Filipa.
+8. **`SUPABASE_DB_URL` w Vercelu** — patrz punkt 6 wyżej (automatyczne
+   migracje schematu). Bez tej zmiennej `npm run build` sam sobie poradzi
+   (pomija migrację z ostrzeżeniem), ale schemat wróci do ręcznego wgrywania.
 
 Dalsze plany produktowe (lista automatyzacji od klienta: windykacja, rozliczenie
 zwrotu, serwisy, dyspozytornia, karty paliwowe, refaktura mandatów i e-TOLL,

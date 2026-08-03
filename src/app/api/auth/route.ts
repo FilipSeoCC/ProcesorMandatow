@@ -257,10 +257,19 @@ export async function POST(request: Request) {
       { status: authResponse.status === 429 ? 429 : 401 },
     );
   if (!authData.access_token || !authData.refresh_token)
+    // This is the branch that actually fires today (Supabase's "Confirm
+    // email" is on) — it's the one real users see right after registering.
+    // The wording covers both steps in one go (confirm the address, then
+    // wait for approval) since the "Zatwierdzono dostęp" notice that would
+    // normally explain the second step is a Resend email and RESEND_API_KEY
+    // is deliberately unconfigured (see docs/stan-projektu.md — parked
+    // 2026-08-02). Don't shorten this back to just "confirm your email"
+    // without restoring that email first.
     return NextResponse.json(
       {
         confirmationRequired: true,
-        message: "Sprawdź skrzynkę e-mail i potwierdź konto.",
+        message:
+          "Dziękujemy za rejestrację w FlotaFlow! Sprawdź skrzynkę e-mail i potwierdź adres, klikając w link w wiadomości. Po potwierdzeniu poczekaj na zatwierdzenie przez administratora — dostęp uzyskasz, gdy Admin z zespołu przyzna Ci rolę w systemie :)",
       },
       { status: 202 },
     );
@@ -286,8 +295,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           pendingApproval: true,
+          // Doesn't promise an email channel specifically: sendRegistrationReceivedEmail
+          // above is a no-op without RESEND_API_KEY (parked 2026-08-02, see
+          // docs/stan-projektu.md), and this branch fires only when Supabase's own
+          // "Confirm email" is off — the wording has to stay true either way.
           message:
-            "Dziękujemy za rejestrację! Twoje konto czeka na zatwierdzenie przez administratora — otrzymasz e-mail, gdy uzyskasz dostęp.",
+            "Dziękujemy za rejestrację! Twoje konto czeka na zatwierdzenie przez administratora.",
         },
         { status: 202 },
       );

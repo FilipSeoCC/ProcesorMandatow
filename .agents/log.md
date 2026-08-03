@@ -193,16 +193,132 @@ Two small requests from a screenshot of the sidebar footer:
 
 **Still needs Filip**: open Ustawienia and set his own first/last name once (same for any other account missing it, e.g. michalgromjr@gmail.com) — the code fix makes this self-correctable but doesn't retroactively fix data for accounts that never went through the signup form.
 
-## 2026-08-02 — Claude — Automated schema migrations (Supabase CLI), replaces manual schema.sql
+## 2026-08-02 — Claude — Parked RESEND_API_KEY/SMTP, corrected the "edit Supabase template for free" claim
 
-Filip's ask, after the "run schema.sql yourself before I push" dance we did earlier this session for the registration-approval-gate feature: stop this from being a recurring manual step that's easy to get out of order with a code deploy (this exact drift already caused a production outage once — see `docs/stan-projektu.md` §6 history).
+Filip decided to park Resend/SMTP setup entirely — he doesn't have a domain mailbox. `docs/stan-projektu.md` section 5 rewritten accordingly; **do not re-propose Resend setup or "quick workarounds" without asking him first**, the alternatives below were explicitly checked and rejected in this conversation.
 
-- **`supabase/schema.sql` is gone.** Its full content is now `supabase/migrations/20260802000000_baseline_schema.sql` — the first Supabase-CLI-tracked migration. Every statement in it was already idempotent (`create table if not exists`, `add column if not exists`, etc.), so it's safe as a baseline even though it's being applied against a database that's already had most of it applied by hand over the session.
+I initially told him editing Supabase Auth's "Confirm signup" template content (to add pending-approval wording, in Polish) was free and required no domain, since Supabase's own confirmation email already works without Resend. **That was wrong.** He sent a screenshot of the Vercel/Supabase email-template panel: the Subject/Body fields are grayed out with "Emails will be sent using the default templates. Set up custom SMTP to edit their subject and body." Editing template *content* on the shared mailer requires the same custom SMTP we were trying to avoid — only the *sending* of the default (English, generic) template is free. Corrected this with him directly; don't repeat the "template edit is free" claim.
+
+Also fixed one small consequence of parking this: `src/app/api/auth/route.ts`'s `pendingApproval` response message used to promise "otrzymasz e-mail, gdy uzyskasz dostęp" — that promise depends on `RESEND_API_KEY` (the role-granted email), which is now deliberately unconfigured. Softened the message to not promise an email channel. Note this branch only fires if Supabase's own "Confirm email" requirement is ever turned off (currently on, per Filip: "linki aktywacyjne... działały i dochodziły" — confirms email confirmation is required today, so the `confirmationRequired: true` branch fires first and this specific message is presently unreachable in practice, but the fix costs nothing and prevents a live inconsistency if that setting ever changes).
+
+If this comes back up: the only two real options are (a) keep Supabase's default English confirm-email template, zero cost, or (b) set up SMTP/Resend properly, which unlocks all three emails at once (registration-received, role-granted, review-package-with-attachment) rather than doing it piecemeal. Cheapest real path to (b) is a ~30-60 zł/rok domain that bundles a mailbox (home.pl, OVH-style registrars).
+
+## 2026-08-02 — Claude — Driver location tracking: analysis only, docs/namierzanie-kierowcy.md
+
+Filip asked how to handle mid-day route changes given the driver's Maps navigation always starts from their live GPS position — nothing implemented, this was explicitly a "write it up, don't build it" request.
+
+Key points if you pick this up: (1) route_stops.status already gives the dispatcher a coarse "where in the sequence" signal for free — don't rebuild that. (2) Maps omitting `origin` and using live GPS is correct behavior, not a bug — the actual gap is dispatcher-side visibility, not navigation. (3) True background GPS tracking is not achievable as a PWA (iOS Safari has no background geolocation for web content when the tab/PWA isn't foregrounded) — don't design around it without first deciding to build a native app. Recommended: Phase 1 = explicit one-shot "Zgłoś lokalizację" button + last-known-position display for the dispatcher, cheap and consent-clean. Phase 2 (foreground-only periodic ping, explicit toggle, visible indicator) only if Phase 1 proves insufficient in practice.
+
+## 2026-08-03 — Claude — Imię/nazwisko z rejestracji (sprawdzone, działa) + analiza: blokada zajętego pojazdu / przypomnienie dla kierowcy / edycja trasy w trakcie dnia (zdiagnozowane, nic jeszcze nie zaimplementowane)
+
+**Część 1 — zamknięta, bez zmian w kodzie.** Filip: "imię i nazwisko usera
+powinno być zaciągane z bazy z tego co wpisał przy rejestracji". Sprawdziłem
+cały łańcuch: `POST /api/auth` (signup) zapisuje `first_name`/`last_name` do
+`user_metadata` w Supabase Auth już przy rejestracji; `GET /api/team`
+(`src/app/api/team/route.ts:60-77`) czyta dokładnie z `user_metadata` przez
+Admin API; `employeeLabel()` w `workspace.tsx:461-465` poprawnie z tego
+korzysta wszędzie (Dokumenty, Sprawy, planer tras), z fallbackiem na e-mail
+tylko gdy `user_metadata` jest puste. Mechanizm już działa tak, jak Filip
+chce — surowe maile, które widział w filtrach, to konta bez wypełnionych
+metadanych (założone przed wdrożeniem zbierania imienia/nazwiska przy
+rejestracji, albo user nigdy nie wszedł w Ustawienia). Jedyny realny fast-follow,
+gdyby wrócił do tego: dać adminowi możliwość wpisania imienia/nazwiska za
+innego usera w panelu Pracownicy (dziś `PATCH /api/team` zmienia tylko rolę,
+nie imię) — nieproszony, nie zaczynaj bez pytania.
+
+**Część 2 — zdiagnozowana, zero kodu napisanego, przerwana brakiem limitu.**
+Filip: pojazd nie powinien dać się wybrać do nowej dostawy, dopóki ma
+nierozwiązaną poprzednią (potwierdził, że to pożądane zachowanie), ale nie
+może utknąć na zawsze bez powiadomienia kierowcy, a modyfikacja trasy po
+starcie dnia potrzebuje "sensownej logiki" zamiast pełnej blokady. Utworzyłem
+3 taski (Task tool, id #15/#16/#17 w tej sesji — nie przetrwają między
+sesjami, tylko dla porządku w tej rozmowie).
+
+Zanim zacząłem pisać kod, przeczytałem cały istniejący flow i **sporo już
+istnieje** — nie buduj tego od zera:
+
+- `PATCH /api/routes/plan/stops/[id]` (`src/app/api/routes/plan/stops/[id]/route.ts`)
+  już zapisuje `delivered`/`failed` na pojedynczym stopie i przy `delivered`
+  ustawia `delivery_orders.delivered_at`.
+- `POST /api/routes/plan/reorder` (`src/app/api/routes/plan/reorder/route.ts`)
+  już woła RPC `reorder_route_stops` z pełną tablicą id — generyczny
+  mechanizm, nie trzeba go zmieniać.
+- `delivery-planner.tsx` ma już gotowy UI potwierdzenia dostawy: `currentStop`
+  (pierwszy stop ze `status==='planned'`), sekcja "NAJBLIŻSZA DOSTAWA" z
+  przyciskami Auto wydane / Nie dostarczono / Przełóż na koniec, oraz modal
+  potwierdzenia (`pendingAction`, `confirmStopAction()`, linie ~956-1145).
+
+Czego brakuje — konkretny plan do zaimplementowania:
+
+1. **Blokada zajętego pojazdu** (dziś nic tego nie pilnuje). `GET
+   /api/fleet/vehicles` (`src/app/api/fleet/vehicles/route.ts`) ma dodać
+   `busy: boolean` — jeden dodatkowy fetch: `delivery_orders?select=vehicle_id
+   &organization_id=eq...&delivered_at=is.null`, zbudować `Set` zajętych id.
+   `POST /api/routes/deliveries` (`src/app/api/routes/deliveries/route.ts`)
+   ma po walidacji pojazdu sprawdzić, czy już ma otwartą dostawę i zwrócić 409
+   z czytelnym komunikatem. `delivery-planner.tsx`: `FleetVehicle` +`busy`,
+   disabled `<option>` z etykietą "(w trasie)" w pickerze (linie ~730-754).
+
+2. **Realny bug, znaleziony przy czytaniu kodu — to jest właściwa przyczyna
+   "auto może utknąć na zawsze" bardziej niż brak powiadomienia**: `GET`,
+   `POST` i `DELETE` w `src/app/api/routes/plan/route.ts` filtrują "aktywny
+   plan" po `planned_for=eq.<dzisiaj>`. Jeśli plan z wczoraj nie został
+   dokończony (nadal `status='active'`, ma stopy `'planned'`), **staje się
+   niewidoczny i niezarządzalny**: `GET` go nie zwróci (szuka tylko
+   dzisiejszego), "Zmień dostawy" (`DELETE`) go nie superseduje (to samo
+   filtrowanie), a jego pojazdy zostają zajęte bez żadnej ścieżki w UI do
+   odblokowania poza ręcznym SQL. Napraw usuwając filtr `planned_for` z tych
+   trzech miejsc — inwariant ma być "jeden aktywny plan na organizację", nie
+   "na dzień"; `planned_for` zostaje jako metadana zapisywana przy tworzeniu,
+   nie jako klucz zapytania. To samo naprawia "trasa przenosi się na kolejny
+   dzień, jeśli nieskończona" w sposób naturalny.
+
+3. **Przypomnienie dla kierowcy**: lekki endpoint zliczający `route_stops`
+   ze `status='planned'` (dowolny aktywny plan, po naprawie punktu 2 to już
+   tylko jeden na organizację) + badge w nawigacji `workspace.tsx` przy
+   "Planer tras" (wzorem badge'a "Błędy", `.navCount`, linie ~1379-1388) i/lub
+   w `NotificationsBell` (`workspace.tsx:2882`, dziś obsługuje tylko zgłoszenia
+   błędów — da się rozszerzyć o drugi typ powiadomienia). Po naprawie punktu 2
+   sam UI plannera (`currentStop` + modal) znów będzie widoczny przy każdym
+   wejściu niezależnie od tego, kiedy plan powstał — badge jest dodatkowym
+   nudge poza ekranem plannera, nie jedynym mechanizmem.
+
+4. **Reorder mid-route**: `move()` w `delivery-planner.tsx` (linia ~381) i
+   strzałki góra/dół w JSX (linia ~1030: `{!routeStarted && (...)}`) chowają
+   się całkowicie, gdy którykolwiek stop jest już rozwiązany. Trzeba pokazywać
+   strzałki dla stopów `status==='planned'` nawet gdy `routeStarted`, ale
+   reorder ma działać **tylko wśród `'planned'` stopów** — rozwiązane
+   (`delivered`/`failed`) zostają na swoich bezwzględnych pozycjach w tablicy
+   wysyłanej do `persistOrder()`/RPC. RPC się nie zmienia, zmienia się tylko
+   to, którą podtablicę UI mu wysyła.
+
+5. **Doklejenie nowej dostawy do aktywnego planu bez resetu całej trasy**:
+   dziś przy `plan` truthy ekran wyboru dostaw (`addStopButton`,
+   `addStopForm`) w ogóle się nie renderuje — jedyna opcja to "Zmień
+   dostawy" (`changeDeliveries()` → `DELETE /api/routes/plan`), które
+   supersedeuje cały plan. Potrzebny nowy `POST /api/routes/plan/stops`,
+   który: tworzy `delivery_orders` (reużyj logikę z `POST
+   /api/routes/deliveries`) i doklein `route_stops` na koniec **aktywnego**
+   planu (`position = max(position)+1`), bez supersedowania. UI: pokazać
+   przycisk "Dodaj dostawę" także na ekranie aktywnego planu, formularz
+   identyczny jak dziś, tylko inny endpoint docelowy gdy `plan` już istnieje.
+
+**Kolejność, w jakiej bym to robił**: najpierw punkt 2 (bug, mały zasięg,
+odblokowuje resztę), potem 1 (blokada, niezależna), potem 3 (badge, zależny
+od 2), na końcu 4 i 5 (UI, największy zasięg zmian w `delivery-planner.tsx`).
+Zero kodu z tego zostało napisane w tej sesji — tylko analiza i ten plan.
+
+## 2026-08-03 — Claude — Automated schema migrations (Supabase CLI), replaces manual schema.sql
+
+Filip's ask, after the "run schema.sql yourself before I push" dance we did earlier this session for the registration-approval-gate feature: stop this from being a recurring manual step that's easy to get out of order with a code deploy (this exact drift already caused a production outage once — see `docs/stan-projektu.md` §6 history). Merged with Codex's concurrent work on the same file — see the schema-drift-canary entry in the `api/health` history and the branches/notifications/reorder additions folded into the migration below; nothing here reverts any of that.
+
+- **`supabase/schema.sql` is gone.** Its full content — including Codex's `branches`/`vehicle_relocations`/`reorder_route_stops`/`notifications_seen_at`/`delivery_orders.delivered_at`/`bug_report_status` additions, all still idempotent — is now `supabase/migrations/20260802000000_baseline_schema.sql`, the first Supabase-CLI-tracked migration. Git's merge folded Codex's schema.sql edits into this renamed file automatically (rename+edit resolved cleanly); I only reviewed the result, didn't hand-merge it.
 - **`scripts/migrate-db.mjs`**, wired into `package.json`'s `build` script (`node scripts/migrate-db.mjs && next build`) and also exposed standalone as `npm run db:migrate`. It runs `supabase db push --db-url "$SUPABASE_DB_URL" --include-all --yes`.
 - **Deliberately fail-soft when the secret is missing, fail-hard when the command actually fails.** If `SUPABASE_DB_URL` isn't set, it logs a warning and exits 0 — the build proceeds without migrating, same as today's status quo, so shipping this doesn't itself break any deploy. If the var IS set and `db push` returns a non-zero exit code, the script exits non-zero too, which fails the whole `npm run build` — a real migration failure must never let the app deploy against a schema that didn't actually update, which is the original bug pattern this is fixing. Verified both paths locally: `npm run db:migrate` without the var prints the warning and exits 0; `npm run build` end-to-end (full `next build`) completes successfully in that same no-var state.
 - Added `supabase` as a pinned devDependency (`2.111.0`, not `^`/`latest` — a CLI version bump changing `db push` behavior mid-flight is not something to discover on a production build) so `npx supabase` in the script resolves to the local install instead of downloading fresh every build.
 - `supabase init` also generated `supabase/config.toml` and `supabase/.gitignore` — standard CLI project scaffolding (local Docker dev ports, `.branches`/`.temp` ignores), no secrets in either, committed as-is.
 - Updated every reference to the old manual-paste workflow: `README.md`, `docs/stan-projektu.md` (§6 marked resolved, file map table, role-migration mention), `.env.example` (new `SUPABASE_DB_URL` var, explicitly distinguished from the REST/Auth keys), and three code comments/error strings in `api/auth/route.ts`, `supabase-auth.ts`, `api/documents/[id]/route.ts` that used to point at `schema.sql`.
+- Complements, doesn't replace, Codex's schema-drift canary on `/api/health` (checks specific columns exist) — that's reactive detection for if something ever slips through; this is the preventive fix so it shouldn't need to fire going forward. Leave both in place.
 - New schema change from now on: `npx supabase migration new <name>` creates a new timestamped file in `supabase/migrations/`; commit it with the code that needs it, push, done — no more separate "go run this in the SQL Editor first" step, no more sequencing dance.
 
 **Still needs Filip**: add `SUPABASE_DB_URL` in Vercel (Project Settings → Environment Variables) — the Postgres connection string with the DB password, from Supabase Dashboard → Project Settings → Database → Connection string → URI. Until that's set, migrations keep not applying automatically (same as before, just with a visible warning in build logs instead of silence) — this change is safe to ship either way, but it isn't actually solving the problem until that variable exists.

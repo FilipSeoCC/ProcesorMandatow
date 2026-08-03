@@ -260,7 +260,7 @@ create policy audit_read on public.audit_events for select using(public.has_org_
 create policy audit_insert on public.audit_events for insert with check(public.is_org_member(organization_id) and user_id=auth.uid());
 create policy mandate_status_events_read on public.mandate_status_events for select using(public.has_org_role(organization_id,array['admin','boss','user']::public.app_role[]));
 
-do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane'); exception when duplicate_object then null; end $$;
+do $$ begin create type public.bug_report_status as enum ('nowe','w_trakcie','rozwiazane','brak_realizacji'); exception when duplicate_object then null; end $$;
 create table if not exists public.bug_reports (
   id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
   reporter_id uuid not null references auth.users(id) on delete cascade, reporter_email text not null default '',
@@ -293,3 +293,112 @@ on conflict(id) do update set public=false,file_size_limit=excluded.file_size_li
 insert into storage.buckets(id,name,public,file_size_limit,allowed_mime_types)
 values('bug-reports','bug-reports',false,8388608,array['image/png','image/jpeg','image/webp','image/gif'])
 on conflict(id) do update set public=false,file_size_limit=excluded.file_size_limit,allowed_mime_types=excluded.allowed_mime_types;
+
+-- Wires up delivery_orders/route_plans/route_stops (already created above with
+-- full RLS) to the route planner UI, which previously only kept this in
+-- localStorage. delivered_at marks a delivery order as done so it drops out
+-- of the "still needs planning" pool; failed ones stay in the pool since
+-- they're retryable.
+alter table public.delivery_orders add column if not exists delivered_at timestamptz;
+
+-- Reorders route_stops for one plan in a single call instead of N sequential
+-- PATCHes from the client, which would transiently violate
+-- unique(route_plan_id, position) on any swap (e.g. moving stop A from
+-- position 1 to 2 while stop B still holds 2). Stops are moved through a
+-- large temporary offset first — position has check(position>0), so negative
+-- temp values aren't an option — then set to their final 1..N order; the
+-- offset range is far above any realistic route length so it can never
+-- collide with another stop's real or temp position mid-update.
+create or replace function public.reorder_route_stops(
+  p_route_plan_id uuid,
+  p_organization_id uuid,
+  p_stop_ids uuid[]
+) returns void language plpgsql security definer set search_path=public as $$
+declare
+  plan_stop_count integer;
+  matched_count integer;
+  stop_id uuid;
+  idx integer;
+begin
+  if not exists (
+    select 1 from public.route_plans
+    where id = p_route_plan_id and organization_id = p_organization_id
+  ) then
+    raise exception 'ROUTE_PLAN_NOT_FOUND';
+  end if;
+
+  select count(*) into plan_stop_count from public.route_stops
+  where route_plan_id = p_route_plan_id and organization_id = p_organization_id;
+  select count(*) into matched_count from public.route_stops
+  where route_plan_id = p_route_plan_id and organization_id = p_organization_id
+    and id = any(p_stop_ids);
+  if p_stop_ids is null or array_length(p_stop_ids,1) is distinct from plan_stop_count
+     or matched_count is distinct from plan_stop_count then
+    raise exception 'STOP_SET_MISMATCH';
+  end if;
+
+  idx := 1;
+  foreach stop_id in array p_stop_ids loop
+    update public.route_stops set position = 100000 + idx
+    where id = stop_id and route_plan_id = p_route_plan_id;
+    idx := idx + 1;
+  end loop;
+
+  idx := 1;
+  foreach stop_id in array p_stop_ids loop
+    update public.route_stops set position = idx
+    where id = stop_id and route_plan_id = p_route_plan_id;
+    idx := idx + 1;
+  end loop;
+end $$;
+revoke all on function public.reorder_route_stops(uuid,uuid,uuid[]) from public;
+grant execute on function public.reorder_route_stops(uuid,uuid,uuid[]) to service_role;
+
+-- MVP for "dyspozytornia": branches (oddziały) + which one currently has each
+-- vehicle. Whole feature is admin/boss only per Filip's ask — deliberately
+-- not exposed to 'user', unlike the rest of fleet management.
+create table if not exists public.branches (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  name text not null, address text not null, phone text not null default '', hours text not null default '',
+  created_at timestamptz not null default now(), unique(organization_id,id)
+);
+alter table public.branches enable row level security;
+drop policy if exists branches_read on public.branches; drop policy if exists branches_write on public.branches;
+create policy branches_read on public.branches for select using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
+create policy branches_write on public.branches for all using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[])) with check(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
+
+alter table public.vehicles add column if not exists branch_id uuid references public.branches(id) on delete set null;
+
+-- History of relocations, not just current state — "mogą się przydać w
+-- przyszłości" per Filip. Both branch references set-null on delete rather
+-- than restrict/cascade, so removing a branch later doesn't destroy history
+-- or block deletion.
+create table if not exists public.vehicle_relocations (
+  id uuid primary key default gen_random_uuid(), organization_id uuid not null references public.organizations(id) on delete cascade,
+  vehicle_id uuid not null, from_branch_id uuid references public.branches(id) on delete set null,
+  to_branch_id uuid references public.branches(id) on delete set null,
+  relocated_by uuid references auth.users(id) on delete set null, relocated_at timestamptz not null default now(),
+  foreign key(organization_id,vehicle_id) references public.vehicles(organization_id,id) on delete cascade
+);
+alter table public.vehicle_relocations enable row level security;
+drop policy if exists relocations_read on public.vehicle_relocations; drop policy if exists relocations_insert on public.vehicle_relocations;
+create policy relocations_read on public.vehicle_relocations for select using(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]));
+create policy relocations_insert on public.vehicle_relocations for insert with check(public.has_org_role(organization_id,array['admin','boss']::public.app_role[]) and relocated_by=auth.uid());
+
+-- Bell notifications: per-member "last opened the notifications panel" mark,
+-- so the dot clears on open rather than on the underlying item's status
+-- (that's what the Błędy nav badge already does, separately, by counting
+-- open reports — these two are deliberately different signals).
+alter table public.organization_members add column if not exists notifications_seen_at timestamptz;
+
+-- ALTER TYPE ... ADD VALUE cannot run in the same transaction as anything
+-- that USES the new value (Postgres restriction, independent of whether it's
+-- wrapped in a DO block — a DO block IS a transaction block, and Supabase's
+-- SQL Editor runs a whole pasted script as one transaction). This bit Codex
+-- once already (see .agents/log.md, "ALTER TYPE ... ADD VALUE" entry) with a
+-- do $$ ... exception when others then null $$ wrapper that silently
+-- swallowed the failure. On an existing database, run this ONE line as its
+-- own separate SQL Editor execution, THEN run the rest of this file
+-- (a fresh database doesn't need the split — create type already lists all
+-- four values below).
+alter type public.bug_report_status add value if not exists 'brak_realizacji';

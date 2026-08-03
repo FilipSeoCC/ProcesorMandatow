@@ -3,6 +3,7 @@
 import {
   Bell,
   Bug,
+  Building2,
   Camera,
   Check,
   CheckCircle2,
@@ -33,6 +34,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import Branches from "./branches";
 import DeliveryPlanner from "./delivery-planner";
 import Employees from "./employees";
 import FleetManager from "./fleet-manager";
@@ -247,21 +249,30 @@ const statusClass: Record<CaseStatus, string> = {
   Zrealizowana: styles.statusResolved,
 };
 
-const bugStatusLabel: Record<"nowe" | "w_trakcie" | "rozwiazane", string> = {
+type BugStatus = "nowe" | "w_trakcie" | "rozwiazane" | "brak_realizacji";
+
+const bugStatusLabel: Record<BugStatus, string> = {
   nowe: "Nowe",
   w_trakcie: "W trakcie",
-  rozwiazane: "Rozwiązane",
+  rozwiazane: "Zrobione",
+  brak_realizacji: "Brak realizacji",
 };
 
-const bugStatusClass: Record<"nowe" | "w_trakcie" | "rozwiazane", string> = {
+const bugStatusClass: Record<BugStatus, string> = {
   nowe: styles.statusReview,
   w_trakcie: styles.statusNew,
   rozwiazane: styles.statusMatched,
+  brak_realizacji: styles.statusClosed,
 };
+
+// Closed either way — done or explicitly not going to happen — drops out of
+// the "needs attention" count in the sidebar nav badge.
+const bugStatusOpen = (status: BugStatus) =>
+  status !== "rozwiazane" && status !== "brak_realizacji";
 
 export default function MandatyWorkspace() {
   const [activeView, setActiveView] = useState<
-    "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs"
+    "cases" | "fleet" | "documents" | "routes" | "employees" | "bugs" | "branches"
   >("cases");
   const [fleetImportOpen, setFleetImportOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -356,13 +367,15 @@ export default function MandatyWorkspace() {
       description: string;
       context: string;
       reporter_email: string;
-      status: "nowe" | "w_trakcie" | "rozwiazane";
+      status: BugStatus;
       created_at: string;
       attachmentUrl: string | null;
     }>
   >([]);
   const [bugReportsLoading, setBugReportsLoading] = useState(false);
   const [bugUpdating, setBugUpdating] = useState<string | null>(null);
+  const [notificationsSeenAt, setNotificationsSeenAt] = useState<string | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [draft, setDraft] = useState({
     plate: "",
     eventAt: "",
@@ -490,10 +503,26 @@ export default function MandatyWorkspace() {
     }
   }
 
-  async function updateBugStatus(
-    id: string,
-    status: "nowe" | "w_trakcie" | "rozwiazane",
-  ) {
+  async function loadNotificationsSeenAt() {
+    const response = await fetch("/api/notifications", { cache: "no-store" });
+    if (!response.ok) return;
+    const data = await response.json().catch(() => ({}));
+    setNotificationsSeenAt(data.seenAt ?? null);
+  }
+
+  async function toggleNotifications() {
+    const opening = !notificationsOpen;
+    setNotificationsOpen(opening);
+    if (!opening) return;
+    // Marks everything currently shown as seen — the dot/count clears on
+    // open, independent of each report's own status (that's what the Błędy
+    // nav badge tracks separately).
+    const response = await fetch("/api/notifications", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) setNotificationsSeenAt(data.seenAt ?? new Date().toISOString());
+  }
+
+  async function updateBugStatus(id: string, status: BugStatus) {
     setBugUpdating(id);
     try {
       const response = await fetch(`/api/bug-reports/${id}`, {
@@ -508,9 +537,16 @@ export default function MandatyWorkspace() {
   }
 
   useEffect(() => {
+    if (account?.role !== "admin") return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- standard fetch-on-role-known pattern
-    if (account?.role === "admin") loadBugReports().catch(() => null);
+    loadBugReports().catch(() => null);
+    loadNotificationsSeenAt().catch(() => null);
   }, [account?.role]);
+
+  const unseenBugReports = bugReports.filter(
+    (report) =>
+      !notificationsSeenAt || new Date(report.created_at) > new Date(notificationsSeenAt),
+  );
 
   const docFiltered = useMemo(
     () =>
@@ -1238,10 +1274,16 @@ export default function MandatyWorkspace() {
           <Menu size={22} />
         </button>
         <Brand compact />
-        <button className={styles.iconButton} aria-label="Powiadomienia">
-          <Bell size={20} />
-          <span className={styles.notificationDot} />
-        </button>
+        <NotificationsBell
+          reports={unseenBugReports}
+          open={notificationsOpen}
+          onToggle={toggleNotifications}
+          onOpenBugs={() => {
+            setActiveView("bugs");
+            setNotificationsOpen(false);
+            setMobileMenu(false);
+          }}
+        />
       </header>
 
       <aside
@@ -1314,6 +1356,19 @@ export default function MandatyWorkspace() {
             <UserRound size={19} />
             Pracownicy
           </button>
+          {(account?.role === "admin" || account?.role === "boss") && (
+            <button
+              type="button"
+              onClick={() => {
+                setActiveView("branches");
+                setMobileMenu(false);
+              }}
+              className={`${styles.navItem} ${activeView === "branches" ? styles.navActive : ""}`}
+            >
+              <Building2 size={19} />
+              Oddziały
+            </button>
+          )}
           {account?.role === "admin" && (
             <button
               type="button"
@@ -1325,9 +1380,9 @@ export default function MandatyWorkspace() {
             >
               <Bug size={19} />
               Błędy
-              {bugReports.filter((report) => report.status !== "rozwiazane").length > 0 && (
+              {bugReports.filter((report) => bugStatusOpen(report.status)).length > 0 && (
                 <span className={styles.navCount}>
-                  {bugReports.filter((report) => report.status !== "rozwiazane").length}
+                  {bugReports.filter((report) => bugStatusOpen(report.status)).length}
                 </span>
               )}
             </button>
@@ -1423,7 +1478,9 @@ export default function MandatyWorkspace() {
                       ? "Pracownicy"
                       : activeView === "bugs"
                         ? "Zgłoszenia błędów"
-                        : "Zarządzanie flotą"}
+                        : activeView === "branches"
+                          ? "Oddziały"
+                          : "Zarządzanie flotą"}
             </h1>
           </div>
           <div className={styles.topbarActions}>
@@ -1435,10 +1492,15 @@ export default function MandatyWorkspace() {
               <CircleHelp size={18} />
               Pomoc
             </button>
-            <button className={styles.iconButton} aria-label="Powiadomienia">
-              <Bell size={20} />
-              <span className={styles.notificationDot} />
-            </button>
+            <NotificationsBell
+              reports={unseenBugReports}
+              open={notificationsOpen}
+              onToggle={toggleNotifications}
+              onOpenBugs={() => {
+                setActiveView("bugs");
+                setNotificationsOpen(false);
+              }}
+            />
             {activeView === "fleet" ? (
               <button
                 className={styles.primaryButton}
@@ -1449,7 +1511,8 @@ export default function MandatyWorkspace() {
               </button>
             ) : activeView === "routes" ||
               activeView === "employees" ||
-              activeView === "bugs" ? null : (
+              activeView === "bugs" ||
+              activeView === "branches" ? null : (
               <button
                 className={styles.primaryButton}
                 onClick={() => setScanOpen(true)}
@@ -1478,7 +1541,9 @@ export default function MandatyWorkspace() {
             onCancelRole={() => setTeamPending(null)}
           />
         ) : activeView === "routes" ? (
-          <DeliveryPlanner />
+          <DeliveryPlanner employeeLabel={employeeLabel} />
+        ) : activeView === "branches" ? (
+          <Branches />
         ) : activeView === "bugs" ? (
           <section className={styles.bugList} aria-label="Zgłoszenia błędów">
             {bugReportsLoading && bugReports.length === 0 ? (
@@ -1535,15 +1600,13 @@ export default function MandatyWorkspace() {
                         value={report.status}
                         disabled={bugUpdating === report.id}
                         onChange={(event) =>
-                          updateBugStatus(
-                            report.id,
-                            event.target.value as "nowe" | "w_trakcie" | "rozwiazane",
-                          )
+                          updateBugStatus(report.id, event.target.value as BugStatus)
                         }
                       >
                         <option value="nowe">Nowe</option>
                         <option value="w_trakcie">W trakcie</option>
-                        <option value="rozwiazane">Rozwiązane</option>
+                        <option value="rozwiazane">Zrobione</option>
+                        <option value="brak_realizacji">Brak realizacji</option>
                       </select>
                       <ChevronDown size={16} />
                     </label>
@@ -2121,7 +2184,8 @@ export default function MandatyWorkspace() {
         </button>
       ) : activeView === "routes" ||
         activeView === "employees" ||
-        activeView === "bugs" ? null : (
+        activeView === "bugs" ||
+        activeView === "branches" ? null : (
         <button
           className={styles.mobileScanButton}
           onClick={() => setScanOpen(true)}
@@ -2811,6 +2875,61 @@ function Brand({ compact = false }: { compact?: boolean }) {
         </strong>
         {!compact && <small>Obsługa dokumentów</small>}
       </span>
+    </div>
+  );
+}
+
+function NotificationsBell({
+  reports,
+  open,
+  onToggle,
+  onOpenBugs,
+}: {
+  reports: Array<{ id: string; description: string; created_at: string }>;
+  open: boolean;
+  onToggle: () => void;
+  onOpenBugs: () => void;
+}) {
+  return (
+    <div className={styles.iconButtonWrap}>
+      <button
+        type="button"
+        className={styles.iconButton}
+        aria-label="Powiadomienia"
+        onClick={onToggle}
+      >
+        <Bell size={20} />
+        {reports.length > 0 && <span className={styles.notificationDot} />}
+      </button>
+      {open && (
+        <div className={styles.notificationsPanel} role="menu">
+          <header>
+            <strong>Powiadomienia</strong>
+          </header>
+          {reports.length === 0 ? (
+            <p className={styles.notificationsEmpty}>Brak nowych powiadomień.</p>
+          ) : (
+            <ul>
+              {reports.slice(0, 8).map((report) => (
+                <li key={report.id}>
+                  <button type="button" onClick={onOpenBugs}>
+                    <span>Nowe zgłoszenie błędu</span>
+                    <small>{report.description.slice(0, 80)}</small>
+                    <time>
+                      {new Date(report.created_at).toLocaleString("pl-PL", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </time>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
