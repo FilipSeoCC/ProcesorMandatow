@@ -69,6 +69,9 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
   (`PATCH /api/auth` z `firstName`/`lastName`) — nie ma już hardkodowanej mapy
   nadpisań e-mail→imię w `workspace.tsx` (był tam realny błąd: konto
   fkedziora@wenet.pl wyświetlało się jako „user Kędziora").
+- Reset zapomnianego hasła mailem (`/api/auth/reset`, `/reset-hasla`) —
+  wykorzystuje wbudowany mechanizm Supabase, działa niezależnie od
+  zaparkowanego `RESEND_API_KEY` (patrz punkt 5 niżej).
 - Otwarta rejestracja (bez zaproszenia) z bramką zatwierdzania — nowe konto nie
   loguje się, dopóki admin/boss nie nada mu roli. Zarządzanie kontami/rolami
   scalone z widokiem **Pracownicy** (tabela kont, widoczna dla admin/boss;
