@@ -21,14 +21,35 @@ export async function DELETE(
       { status: 503 },
     );
   const headers = adminHeaders(secretKey);
+  const jsonHeaders = { ...headers, "Content-Type": "application/json" };
 
-  await fetch(
-    `${url}/rest/v1/vehicle_assignments?organization_id=eq.${member.organizationId}&vehicle_id=eq.${encodeURIComponent(id)}`,
-    { method: "DELETE", headers },
+  // Soft delete: vehicle_assignments and delivery_orders both reference
+  // vehicles with "on delete restrict", so a hard delete would either be
+  // blocked by any delivery history (leaving a confusing partial failure) or
+  // — the previous bug here — irreversibly destroy the assignment history
+  // via a pre-emptive delete before finding out the vehicle delete itself
+  // would fail anyway. Marking the vehicle removed keeps all history intact
+  // and sidesteps both FK constraints entirely.
+  const closeAssignments = await fetch(
+    `${url}/rest/v1/vehicle_assignments?organization_id=eq.${member.organizationId}&vehicle_id=eq.${encodeURIComponent(id)}&valid_to=is.null`,
+    {
+      method: "PATCH",
+      headers: { ...jsonHeaders, Prefer: "return=minimal" },
+      body: JSON.stringify({ valid_to: new Date().toISOString() }),
+    },
   );
+  if (!closeAssignments.ok)
+    return NextResponse.json(
+      { error: "Nie udało się zamknąć przypisania pojazdu." },
+      { status: 502 },
+    );
   const response = await fetch(
     `${url}/rest/v1/vehicles?id=eq.${encodeURIComponent(id)}&organization_id=eq.${member.organizationId}`,
-    { method: "DELETE", headers },
+    {
+      method: "PATCH",
+      headers: { ...jsonHeaders, Prefer: "return=minimal" },
+      body: JSON.stringify({ status: "removed" }),
+    },
   );
   if (!response.ok)
     return NextResponse.json(

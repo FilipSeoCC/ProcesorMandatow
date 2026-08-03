@@ -38,9 +38,9 @@ function normalize(value: string) {
 
 const statusClass: Record<Employee["status"], string> = {
   "Dostępny": styles.activeStatus,
-  "W trasie": styles.activeStatus,
-  "Urlop": styles.activeStatus,
-  "Nieaktywny": styles.activeStatus,
+  "W trasie": styles.statusOnRoute,
+  "Urlop": styles.statusOnLeave,
+  "Nieaktywny": styles.unassignedStatus,
 };
 
 const emptyForm = {

@@ -38,7 +38,7 @@ export async function GET(request: Request) {
   const headers = adminHeaders(secretKey);
 
   const vehiclesResponse = await fetch(
-    `${url}/rest/v1/vehicles?select=id,brand,model,registration_number&organization_id=eq.${member.organizationId}&order=created_at.desc`,
+    `${url}/rest/v1/vehicles?select=id,brand,model,registration_number&organization_id=eq.${member.organizationId}&status=neq.removed&order=created_at.desc`,
     { headers, cache: "no-store" },
   );
   if (!vehiclesResponse.ok)
@@ -192,7 +192,7 @@ export async function POST(request: Request) {
       {
         method: "PATCH",
         headers: { ...jsonHeaders, Prefer: "return=minimal" },
-        body: JSON.stringify({ brand, model }),
+        body: JSON.stringify({ brand, model, status: "active" }),
       },
     );
   } else {
