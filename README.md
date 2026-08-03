@@ -41,6 +41,7 @@ Otwórz [http://localhost:4173](http://localhost:4173). Skopiuj `.env.example` d
 Zmienne środowiskowe (patrz `.env.example`) trzeba ustawić w Vercelu:
 
 - `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY` — baza i auth,
+- `SUPABASE_DB_URL` — connection string do Postgresa, potrzebny do automatycznych migracji schematu przy buildzie (patrz „Model danych Supabase" niżej),
 - `GOOGLE_DOCUMENT_AI_PROCESSOR_ID`, `GOOGLE_DOCUMENT_AI_LOCATION`, `GOOGLE_WIF_AUDIENCE`, `GOOGLE_CLOUD_PROJECT_ID` — OCR i planer tras (WIF, bez klucza),
 - `GOOGLE_MAPS_SERVER_API_KEY` — **osobny** klucz do geokodowania adresów w planerze tras (Maps Geocoding API — inne API niż Route Optimization, nadal wymaga klucza),
 - `RESEND_API_KEY`, `RESEND_FROM_EMAIL`, `MANDATE_REVIEW_EMAIL`, `APP_URL` — wysyłka pakietu do pracownika,
@@ -51,7 +52,9 @@ Sprawdź stan konfiguracji bez logowania: `curl https://procesor-mandatow.vercel
 
 ## Model danych Supabase
 
-`supabase/schema.sql` to pełny schemat — **nie jest automatycznie stosowany**, trzeba go ręcznie uruchomić w Supabase SQL Editor po każdej zmianie (wszystko jest idempotentne, `add column if not exists`/`update`). Zawiera: organizacje i członkostwa z rolami, klientów i pojazdów, historię przypisań pojazd→klient (z ograniczeniem wykluczającym nakładające się okresy), zlecenia dostawy i trasy, dokumenty mandatowe z polami finansowymi, log audytowy, RLS.
+Schemat żyje w `supabase/migrations/*.sql` (Supabase CLI) i **stosuje się automatycznie przy każdym buildzie** — `npm run build` najpierw odpala `supabase db push --db-url "$SUPABASE_DB_URL"`, potem `next build`. Nowa zmiana schematu to nowy plik migracji (`npx supabase migration new nazwa`), commitowany razem z kodem, który go potrzebuje — bez ręcznego wklejania do SQL Editora. Zawiera: organizacje i członkostwa z rolami, klientów i pojazdów, historię przypisań pojazd→klient (z ograniczeniem wykluczającym nakładające się okresy), zlecenia dostawy i trasy, dokumenty mandatowe z polami finansowymi, log audytowy, RLS.
+
+Wymaga zmiennej `SUPABASE_DB_URL` w Vercelu (connection string do bazy Postgres z hasłem — Supabase Dashboard → Project Settings → Database → Connection string → URI; **to nie to samo** co `SUPABASE_URL`/`SUPABASE_SECRET_KEY`, które są kluczami REST/Auth).
 
 Pierwsze konto zakłada organizację i zostaje adminem (`bootstrap_organization`), od razu aktywnym. Rejestracja jest zawsze otwarta (bez zaproszenia), ale każde kolejne konto ląduje ze statusem `pending` i rolą `user` — nie może się zalogować, dopóki admin/boss nie nada mu roli w tabeli kont na ekranie **Pracownicy** (ta akcja jednocześnie ustawia status na `active`). Rejestrujący się dostaje od razu e-mail z potwierdzeniem, a drugi — o przyznanym dostępie — dopiero po zatwierdzeniu.
 

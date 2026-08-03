@@ -5,8 +5,9 @@ import { getSupabaseServerEnv } from "@/lib/supabase-env";
 // management, boss = everything a user can do plus confirming case data
 // (the one action that commits the org to a client/authority), user = all
 // day-to-day case/fleet/route work minus confirming. Old finer-grained
-// values (dispatcher/office/scanner/viewer) are migrated to 'user' by
-// schema.sql; don't reintroduce them without updating the RLS policies too.
+// values (dispatcher/office/scanner/viewer) are migrated to 'user' by the
+// baseline migration in supabase/migrations; don't reintroduce them
+// without updating the RLS policies too.
 export type AppRole = "admin" | "boss" | "user";
 export type VerifiedMember = {
   userId: string;

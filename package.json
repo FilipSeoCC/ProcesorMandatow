@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 4173",
-    "build": "next build",
+    "build": "node scripts/migrate-db.mjs && next build",
+    "db:migrate": "node scripts/migrate-db.mjs",
     "start": "next start",
     "lint": "eslint",
     "test:authority": "node scripts/check-authority-detection.cjs"
@@ -28,6 +29,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.2.12",
+    "supabase": "2.111.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

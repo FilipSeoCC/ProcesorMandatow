@@ -273,7 +273,7 @@ export async function POST(request: Request) {
       return NextResponse.json(
         {
           error: created.schemaMissing
-            ? "Brakuje schematu aplikacji w Supabase. Uruchom plik supabase/schema.sql w SQL Editorze."
+            ? "Brakuje schematu aplikacji w Supabase — migracje (supabase/migrations) nie zostały zastosowane na tej bazie."
             : "Nie udało się utworzyć organizacji.",
         },
         { status: 503 },

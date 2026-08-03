@@ -48,7 +48,7 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 | `src/app/workspace.tsx` | Prawie całe UI zalogowanej aplikacji (~2600 linii) |
 | `src/app/employees.tsx` | Widok **Pracownicy** — kierowcy (wszyscy) + tabela kont/ról (admin/boss) |
 | `src/lib/account-emails.ts` | Szablony dwóch maili rejestracyjnych (Resend) |
-| `supabase/schema.sql` | Schemat; **wymaga ręcznego uruchomienia w Supabase** |
+| `supabase/migrations/*.sql` | Schemat, wersjonowany; **stosowany automatycznie w `npm run build`** |
 
 ---
 
@@ -91,9 +91,9 @@ loguje od razu. Model ról uproszczony do trzech:
 - `user` — cała codzienna obsługa spraw/floty/tras, bez zatwierdzania.
 
 Stare, drobniejsze role (`dispatcher`, `office`, `scanner`, `viewer`) zostają w
-enumie bazy tylko dla zgodności wstecznej (migracja w `schema.sql` przepisuje
-istniejące rekordy na `user`) — **nie używaj ich ponownie** w RLS ani
-w sprawdzaniu ról w endpointach.
+enumie bazy tylko dla zgodności wstecznej (migracja w baseline
+`supabase/migrations/` przepisuje istniejące rekordy na `user`) — **nie
+używaj ich ponownie** w RLS ani w sprawdzaniu ról w endpointach.
 
 **Bramka zatwierdzania (dodana 2026-08-02)**: `organization_members` ma teraz
 kolumnę `status` (`pending`/`active`, domyślnie `active` — istniejące konta nie
@@ -145,7 +145,9 @@ curl -s https://procesor-mandatow.vercel.app/api/health
 ```
 
 Stan na 2026-08-02 (po dodaniu `CRON_SECRET` — `ocrQueueConfigured` jest już
-`true`, kolejka OCR i auto-dopasowanie działają):
+`true`; Filip ręcznie odpalił oba crony w panelu Vercela, `/api/internal/documents/rematch`
+zwrócił **200** — kolejka OCR i auto-dopasowanie faktycznie działają, nie tylko
+wyglądają na skonfigurowane):
 
 - `emailConfigured: false` — brak `RESEND_API_KEY`/`RESEND_FROM_EMAIL`.
   Wysyłka pakietu do pracownika (`review-package`) zwraca 503, a oba nowe
@@ -157,13 +159,27 @@ Stan na 2026-08-02 (po dodaniu `CRON_SECRET` — `ocrQueueConfigured` jest już
   ustawić te dwie zmienne w Vercelu, żeby którakolwiek wysyłka mailem
   faktycznie zadziałała.
 
-### 6. Schemat bazy trzeba wgrywać ręcznie
+### 6. ~~Schemat bazy trzeba wgrywać ręcznie~~ — rozwiązane 2026-08-02
 
-`supabase/schema.sql` nie jest nigdzie automatycznie stosowany. **To już raz
-wywołało awarię na produkcji**: kod zapisywał kolumny, których nie było w żywej
-bazie, przez co „Zatwierdź dane" zwracało 502, a ponawianie OCR 500. Po każdej
-zmianie schematu **uruchom go w Supabase SQL Editor** (wszystko jest na
-`add column if not exists`, więc jest idempotentne).
+To już raz wywołało awarię na produkcji: kod zapisywał kolumny, których nie
+było w żywej bazie, przez co „Zatwierdź dane" zwracało 502, a ponawianie OCR
+500 — bo `supabase/schema.sql` trzeba było wkleić do SQL Editora ręcznie i
+osobno pilnować kolejności względem pusha kodu.
+
+Teraz schemat żyje w `supabase/migrations/*.sql` (Supabase CLI, cały dawny
+`schema.sql` stał się pierwszą migracją — `20260802000000_baseline_schema.sql`).
+`package.json`'s `build` script odpala `supabase db push --db-url
+"$SUPABASE_DB_URL" --include-all` **przed** `next build` — migracje stosują
+się automatycznie przy każdym deployu, kod i schemat zawsze razem, zero
+pamiętania o kolejności. Nowa zmiana schematu = nowy plik w
+`supabase/migrations/` (np. `npx supabase migration new nazwa`), commitowany
+zwykłym pushem.
+
+**Wymaga `SUPABASE_DB_URL` w Vercelu** (connection string z hasłem do bazy,
+z Supabase Dashboard → Database → Connection string — **nie** klucz
+REST/Auth). Dopóki ta zmienna nie jest ustawiona, `npm run build` (a więc
+każdy deploy) będzie się wywalać na tym kroku — patrz `.agents/log.md` po
+szczegóły i status wdrożenia.
 
 ---
 
@@ -211,7 +227,7 @@ skasowania tej zmiennej i unieruchomienia planera.
 Kolejność, którą uważam za właściwą:
 
 1. ~~Zapraszanie użytkowników i zarządzanie rolami~~ — zrobione 2026-08-02 (patrz wyżej).
-2. ~~`CRON_SECRET` w Vercelu~~ — ustawione 2026-08-02, kolejka OCR i auto-dopasowanie działają.
+2. ~~`CRON_SECRET` w Vercelu~~ — ustawione i **zweryfikowane** 2026-08-02 (ręczne "Run" w panelu Cron Jobs, 200 w logach), kolejka OCR i auto-dopasowanie realnie działają.
 3. **`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu** — bez tego żadna wysyłka mailem (pakiet do pracownika, dwa maile rejestracyjne) nie działa.
 4. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
 5. **Testy `extractMandateFields`**.

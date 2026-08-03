@@ -1,3 +1,10 @@
+-- Baseline migration: the full accumulated schema as it existed in the old
+-- hand-run supabase/schema.sql, captured as the first Supabase-CLI-tracked
+-- migration. From here on, schema changes are new files in this directory,
+-- applied automatically on deploy (see package.json's "build" script and
+-- README) instead of a manual paste into the Supabase SQL Editor. Every
+-- statement below is still idempotent (create/add ... if not exists), so
+-- re-running this against the already-migrated production database is safe.
 create extension if not exists pgcrypto;
 create extension if not exists btree_gist;
 

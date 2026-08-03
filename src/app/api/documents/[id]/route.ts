@@ -106,7 +106,8 @@ export async function PATCH(
     // PostgREST explains exactly what it rejected (missing column, constraint,
     // bad type). Swallowing it left "Nie udało się zapisać sprawy" as the only
     // signal, which is indistinguishable from a network problem and hides the
-    // most likely cause: schema.sql not applied to the live database.
+    // most likely cause: a migration in supabase/migrations not yet applied
+    // to the live database.
     const detail = await response.text().catch(() => "");
     console.error("mandate_documents PATCH failed", response.status, detail);
     let message = "";
