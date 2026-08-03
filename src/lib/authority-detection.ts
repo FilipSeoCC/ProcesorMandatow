@@ -53,15 +53,84 @@ const AUTHORITY_RULES: AuthorityRule[] = [
     pattern: /(?:zarząd dróg miejskich|miejski zarząd dróg)/i,
     confidence: 0.9,
   },
+  // Niemcy — sprawy zza granicy trafiają na polski numer rejestracyjny, ale
+  // list piszą niemieckie urzędy, więc potrzebują własnych wzorców nazwy.
+  {
+    pattern: /zentrale\s+bußgeldstelle|bußgeldstelle|bussgeldstelle/i,
+    confidence: 0.94,
+  },
+  {
+    pattern: /landesamt für zentrale polizeiliche dienste/i,
+    canonicalName: "Landesamt für Zentrale Polizeiliche Dienste",
+    confidence: 0.97,
+  },
+  {
+    pattern: /ordnungsamt/i,
+    confidence: 0.9,
+  },
+  {
+    pattern: /polizei(?:präsidium|direktion|inspektion|behörde)/i,
+    confidence: 0.92,
+  },
+  {
+    pattern: /regierungspräsidium/i,
+    confidence: 0.88,
+  },
+  // Francja
+  {
+    pattern:
+      /agence nationale de traitement automatisé des infractions|\bantai\b/i,
+    canonicalName:
+      "Agence Nationale de Traitement Automatisé des Infractions (ANTAI)",
+    confidence: 0.97,
+  },
+  {
+    pattern: /officier du ministère public/i,
+    confidence: 0.9,
+  },
+  {
+    pattern: /préfecture(?:\s+de police)?/i,
+    confidence: 0.88,
+  },
+  {
+    pattern: /centre automatisé de constatation des infractions routières/i,
+    confidence: 0.94,
+  },
+  // Hiszpania
+  {
+    pattern: /dirección general de tráfico|\bdgt\b/i,
+    canonicalName: "Dirección General de Tráfico (DGT)",
+    confidence: 0.97,
+  },
+  {
+    pattern: /jefatura (?:provincial|local) de tráfico/i,
+    confidence: 0.92,
+  },
+  {
+    pattern: /ayuntamiento de\s+[\p{L}\s-]+/iu,
+    confidence: 0.88,
+  },
 ];
 
+// Numer rejestracyjny jest zawsze polski (flota nie ma zagranicznych
+// pojazdów), ale nadawcą wezwania bywa zagraniczny urząd — Niemcy/Francja/
+// Hiszpania to najczęstsze kraje tranzytowe. Kod pocztowy i słowa-granice
+// muszą rozpoznawać też te formaty, inaczej adres i granice sekcji nigdy się
+// nie znajdą, nawet jeśli sama nazwa urzędu złapie się na wzorzec wyżej.
 const ADDRESS_START =
-  /^(?:ul(?:ica)?\.?|al(?:eja|e)?\.?|aleje|pl(?:ac)?\.?|rondo|os(?:iedle)?\.?|skrytka pocztowa)\s+/i;
-const POSTAL_CODE = /\b\d{2}-\d{3}\b/;
+  /^(?:ul(?:ica)?\.?|al(?:eja|e)?\.?|aleje|pl(?:ac)?\.?|rondo|os(?:iedle)?\.?|skrytka pocztowa|straße|str\.?|platz|allee|weg|rue|avenue|av\.?|boulevard|bd\.?|place|allée|calle|c\/\.?|avenida|avda\.?|plaza|paseo)\s+/i;
+// Polska: XX-XXX. Niemcy/Francja/Hiszpania: pięć cyfr bez myślnika.
+const POSTAL_CODE = /\b\d{2}-\d{3}\b|\b\d{5}\b/;
+// "do"/"an"/"a"/"à" są też zwykłymi, częstymi słowami/przedrostkami (np.
+// "Ayuntamiento", "Anlage", "dokument") — bez wymogu dwukropka złapałyby
+// prawie każdą linię zaczynającą się na tę literę i przerywałyby szukanie
+// adresu za wcześnie. Dwukropek wymagany tylko dla tych krótkich etykiet;
+// pełne słowa (adresat, empfänger, destinataire...) same są wystarczająco
+// swoiste, dwukropek zostaje opcjonalny jak dotychczas.
 const SECTION_BOUNDARY =
-  /^(?:do|adresat|odbiorca|sygnatura|znak sprawy|numer sprawy|nr sprawy|data|dotyczy)\s*[:：]?/i;
+  /^(?:adresat|odbiorca|sygnatura|znak sprawy|numer sprawy|nr sprawy|data|dotyczy|empfänger|aktenzeichen|geschäftszeichen|datum|betrifft|betreff|destinataire|référence|objet|concernant|destinatario|referencia|expediente|fecha|asunto)\s*[:：]?|^(?:do|an|a|à)\s*[:：]/i;
 const BODY_NOISE =
-  /(?:w związku z|niniejszym|prosimy|zawiadamiamy|ujawnieniem naruszenia|urządzeni[ea] rejestrując|pojazd|wykroczen)/i;
+  /(?:w związku z|niniejszym|prosimy|zawiadamiamy|ujawnieniem naruszenia|urządzeni[ea] rejestrując|pojazd|wykroczen|in verbindung mit|hiermit|bitten|teilen.{0,3}mit|feststellung|messgerät|fahrzeug|verstoß|verkehrsordnungswidrigkeit|en relation avec|par la présente|informons|constatation|infraction|véhicule|appareil|en relación con|por medio de|informamos|constatación|infracción|vehículo|dispositivo)/i;
 
 function cleanLine(value: string) {
   return value
@@ -74,11 +143,13 @@ function cleanLine(value: string) {
 function nameFromLine(line: string, rule: AuthorityRule) {
   if (rule.canonicalName) return rule.canonicalName;
   const withoutLabel = line.replace(
-    /^(?:nadawca|organ|wystawca|adresat)\s*[:：-]\s*/i,
+    /^(?:nadawca|organ|wystawca|adresat|absender|behörde|aussteller|expéditeur|autorité|remitente|autoridad)\s*[:：-]\s*/i,
     "",
   );
   const withoutAddress = withoutLabel
-    .split(/\s{2,}|\s+(?=(?:ul\.?|al\.?|aleje|plac|pl\.?|\d{2}-\d{3})\s)/i)[0]
+    .split(
+      /\s{2,}|\s+(?=(?:ul\.?|al\.?|aleje|plac|pl\.?|straße|str\.?|platz|rue|avenue|av\.?|calle|avenida|avda\.?|\d{2}-\d{3}|\d{5})\s)/i,
+    )[0]
     .replace(/[,:;\s-]+$/g, "")
     .trim();
   if (
