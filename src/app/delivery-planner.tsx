@@ -3,12 +3,14 @@
 import {
   AlertTriangle,
   ArrowDown,
+  ArrowLeft,
   ArrowUp,
   CarFront,
   Check,
   CheckCircle2,
   Clock3,
   ExternalLink,
+  History,
   LoaderCircle,
   MapPin,
   Navigation,
@@ -62,6 +64,33 @@ type FleetVehicle = {
   registration: string;
   customer: string;
 };
+type HistoryPlanSummary = {
+  id: string;
+  plannedFor: string;
+  status: string;
+  mode: string;
+  dispatcherId: string | null;
+  createdAt: string;
+  distanceKm: number;
+  durationMinutes: number;
+  totalStops: number;
+  deliveredCount: number;
+  failedCount: number;
+};
+type PlanDetail = {
+  id: string;
+  mode: string;
+  distanceKm: number;
+  durationMinutes: number;
+  stops: Array<{
+    stopId: string;
+    vehicle: string;
+    customer: string;
+    address: string;
+    status: string;
+    notes: string;
+  }>;
+};
 const depot = {
   address: "Aleje Jerozolimskie 228, 02-495 Warszawa",
   latitude: 52.18798,
@@ -88,7 +117,11 @@ function authHeaders() {
   };
 }
 
-export default function DeliveryPlanner() {
+export default function DeliveryPlanner({
+  employeeLabel,
+}: {
+  employeeLabel?: (userId?: string | null) => string;
+}) {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [deliveriesLoading, setDeliveriesLoading] = useState(true);
   const [fleetVehicles, setFleetVehicles] = useState<FleetVehicle[]>([]);
@@ -115,6 +148,11 @@ export default function DeliveryPlanner() {
   const [failureReason, setFailureReason] = useState("Klient nieobecny");
   const [stopActionLoading, setStopActionLoading] = useState(false);
   const [changingDeliveries, setChangingDeliveries] = useState(false);
+  const [screen, setScreen] = useState<"plan" | "history" | "historyDetail">("plan");
+  const [historyPlans, setHistoryPlans] = useState<HistoryPlanSummary[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyDetail, setHistoryDetail] = useState<PlanDetail | null>(null);
+  const [historyDetailLoading, setHistoryDetailLoading] = useState(false);
 
   const ordered = plan?.stops ?? [];
   const currentStop = ordered.find((item) => item.status === "planned");
@@ -164,6 +202,40 @@ export default function DeliveryPlanner() {
       .then((data) => setFleetVehicles(data.vehicles ?? []))
       .catch(() => {});
   }, []);
+
+  async function loadHistory() {
+    setHistoryLoading(true);
+    try {
+      const response = await fetch("/api/routes/plan/history", {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setHistoryPlans(data.plans ?? []);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function openHistoryDetail(id: string) {
+    setScreen("historyDetail");
+    setHistoryDetailLoading(true);
+    try {
+      const response = await fetch(`/api/routes/plan/history/${id}`, {
+        headers: authHeaders(),
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) setHistoryDetail(data.plan ?? null);
+    } finally {
+      setHistoryDetailLoading(false);
+    }
+  }
+
+  function openHistory() {
+    setScreen("history");
+    if (!historyPlans.length) loadHistory();
+  }
 
   async function addDelivery() {
     const customer = addForm.customer.trim();
@@ -451,9 +523,131 @@ export default function DeliveryPlanner() {
             <small>punkty dzisiaj</small>
           </span>
         </div>
+        {screen === "plan" && (
+          <button type="button" className={styles.historyLink} onClick={openHistory}>
+            <History size={15} />
+            Historia tras
+          </button>
+        )}
       </section>
-      {busy ? (
-        <p className={styles.error} style={{ background: "transparent", color: "#64748b" }}>
+      {screen === "history" ? (
+        <>
+          <button
+            type="button"
+            className={styles.historyBack}
+            onClick={() => setScreen("plan")}
+          >
+            <ArrowLeft size={15} />
+            Wróć do dzisiejszej trasy
+          </button>
+          {historyLoading ? (
+            <p className={styles.loading}>
+              <LoaderCircle className={styles.spin} size={17} />
+              Ładowanie historii…
+            </p>
+          ) : !historyPlans.length ? (
+            <p className={styles.emptyState}>Brak zapisanych tras z poprzednich dni.</p>
+          ) : (
+            <div className={styles.historyList}>
+              {historyPlans.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={styles.historyCard}
+                  onClick={() => openHistoryDetail(item.id)}
+                >
+                  <div>
+                    <strong>
+                      {new Date(item.plannedFor).toLocaleDateString("pl-PL", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                      })}
+                    </strong>
+                    <small>
+                      Zaplanował: {employeeLabel ? employeeLabel(item.dispatcherId) : "—"} ·{" "}
+                      {item.distanceKm} km · {Math.floor(item.durationMinutes / 60)} h{" "}
+                      {item.durationMinutes % 60} min
+                    </small>
+                  </div>
+                  <span className={styles.historyStats}>
+                    <b>{item.deliveredCount} wydane</b>
+                    {item.failedCount > 0 && <i>{item.failedCount} nieudane</i>}
+                    <span>/ {item.totalStops}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      ) : screen === "historyDetail" ? (
+        <>
+          <button
+            type="button"
+            className={styles.historyBack}
+            onClick={() => {
+              setScreen("history");
+              setHistoryDetail(null);
+            }}
+          >
+            <ArrowLeft size={15} />
+            Wróć do historii
+          </button>
+          {historyDetailLoading || !historyDetail ? (
+            <p className={styles.loading}>
+              <LoaderCircle className={styles.spin} size={17} />
+              Ładowanie trasy…
+            </p>
+          ) : (
+            <>
+              <div className={styles.historyDetailHeader}>
+                <strong>
+                  {historyDetail.distanceKm} km · {Math.floor(historyDetail.durationMinutes / 60)} h{" "}
+                  {historyDetail.durationMinutes % 60} min
+                </strong>
+                <span>
+                  {historyDetail.mode === "google" ? "Google Optimization" : "Tryb demonstracyjny"}{" "}
+                  · {historyDetail.stops.length} dostaw
+                </span>
+              </div>
+              <section className={styles.routeList}>
+                {historyDetail.stops.map((stop, index) => {
+                  const completed = stop.status === "delivered";
+                  const failed = stop.status === "failed";
+                  return (
+                    <article
+                      key={stop.stopId}
+                      className={`${completed ? styles.completedStop : ""} ${failed ? styles.failedStop : ""}`}
+                    >
+                      <span className={styles.stopNo}>
+                        {completed ? (
+                          <Check size={16} />
+                        ) : failed ? (
+                          <XCircle size={16} />
+                        ) : (
+                          index + 1
+                        )}
+                      </span>
+                      <div>
+                        <strong>{stop.customer}</strong>
+                        <b>{stop.vehicle}</b>
+                        <small>
+                          {stop.address} ·{" "}
+                          {completed ? "wydano" : failed ? "nie dostarczono" : "zaplanowano"}
+                        </small>
+                        {failed && stop.notes && (
+                          <small className={styles.historyStopNotes}>Powód: {stop.notes}</small>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </section>
+            </>
+          )}
+        </>
+      ) : busy ? (
+        <p className={styles.loading}>
           <LoaderCircle className={styles.spin} size={17} />
           Ładowanie planu…
         </p>
@@ -492,6 +686,7 @@ export default function DeliveryPlanner() {
                   Pojazd
                   <select
                     value={addForm.vehicleId}
+                    disabled={!fleetVehicles.length}
                     onChange={(event) => {
                       const vehicleId = event.target.value;
                       const vehicle = fleetVehicles.find((item) => item.id === vehicleId);
@@ -515,6 +710,12 @@ export default function DeliveryPlanner() {
                     ))}
                   </select>
                 </label>
+                {!fleetVehicles.length && (
+                  <p className={styles.addStopFormHint}>
+                    Brak pojazdów we flocie — dodaj przynajmniej jeden w zakładce „Flota&rdquo;,
+                    zanim zaplanujesz dostawę.
+                  </p>
+                )}
                 <label>
                   Klient
                   <input
@@ -577,7 +778,7 @@ export default function DeliveryPlanner() {
                 <button
                   type="button"
                   className={styles.addStopSubmit}
-                  disabled={geocoding}
+                  disabled={geocoding || !fleetVehicles.length}
                   onClick={addDelivery}
                 >
                   {geocoding ? (
@@ -626,9 +827,7 @@ export default function DeliveryPlanner() {
                 </div>
               ))}
               {!deliveries.length && (
-                <p className={styles.error} style={{ background: "transparent", color: "#64748b" }}>
-                  Brak dostaw do zaplanowania. Dodaj pierwszą powyżej.
-                </p>
+                <p className={styles.emptyState}>Brak dostaw do zaplanowania. Dodaj pierwszą powyżej.</p>
               )}
             </div>
           </section>
