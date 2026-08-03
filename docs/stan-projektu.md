@@ -125,16 +125,49 @@ pismach, ale **nikt go nie przeszedł na prawdziwych dokumentach**. Bez tej
 liczby nie ma podstaw ani do wdrożenia, ani do rozmowy o cenie — cała wartość
 produktu opiera się na tym, że człowiek nie przepisuje danych ręcznie.
 
-### 4. Planer tras nie zapisuje nic do bazy
+### 4. ~~Planer tras nie zapisuje nic do bazy~~ — rozwiązane, ale ma otwarte luki (patrz niżej)
 
-`delivery-planner.tsx` trzyma wszystko w stanie lokalnym i `localStorage`. W
-interfejsie jest to nawet napisane wprost. Albo podpiąć do bazy, albo ukryć —
-zostawienie tak wprowadza użytkownika w błąd.
+`route_plans`/`route_stops`/`delivery_orders` to prawdziwe tabele (patrz
+`supabase/schema.sql`), planer jest w pełni podpięty pod bazę, jest historia
+tras (`/api/routes/plan/history` + `[id]`, ekran "Historia tras" w
+`delivery-planner.tsx`). To nie jest już otwarty temat.
 
-Ręczna zmiana kolejności przystanków (strzałki góra/dół) działa poprawnie —
-sprawdzone i potwierdzone 2026-08-02. Przycisk "Nawiguj" wcześniej wyglądał na
-zepsuty z innego powodu: `target="_blank"` na linku do Google Maps nic nie
-robi w trybie `standalone` PWA (`manifest.ts`) na iOS — usunięte.
+**Otwarte luki, zdiagnozowane 2026-08-03, nic jeszcze nie zaimplementowane:**
+
+Filip: pojazd nie powinien dać się wybrać do nowej dostawy, dopóki ma
+nierozwiązaną (kierowca nie potwierdził) poprzednią — i to jest ok, że przy
+braku wolnego pojazdu planer blokuje. Ale: (a) nic dziś faktycznie tego nie
+pilnuje po stronie serwera — `POST /api/routes/deliveries` przyjmie ten sam
+`vehicleId` drugi raz bez żadnego sprawdzenia, `GET /api/fleet/vehicles` nie
+zwraca informacji, że pojazd jest zajęty; (b) jeśli kierowca nigdy nie
+potwierdzi dostawy (`route_stops.status` zostaje `'planned'` na zawsze), auto
+utknie bez żadnego powiadomienia dla nikogo — trzeba nawigacyjny
+badge/przypomnienie; (c) **realny bug znaleziony przy analizie**: `GET/POST/DELETE
+/api/routes/plan` filtrują "aktywny plan" po `planned_for=eq.<dzisiaj>` — plan
+z wczoraj, który nie został dokończony (nadal ma `status='active'` i
+nierozwiązane stopy), staje się niewidoczny i niezarządzalny przez UI (nie
+pokaże się w GET, nie da się go superseded'ować przez "Zmień dostawy"), a jego
+pojazdy zostają zajęte bez żadnego sposobu na odblokowanie poza ręcznym SQL.
+Napraw przez usunięcie filtra `planned_for` z tych trzech miejsc — inwariant
+powinien być "jeden aktywny plan na organizację", nie "na dzień". `planned_for`
+zostaje jako metadana, nie jako klucz zapytania.
+(d) reorder (`move()` w `delivery-planner.tsx`) chowa strzałki góra/dół
+całkowicie po `routeStarted` (dowolny stop już rozwiązany) — trzeba pozwolić
+zmieniać kolejność **tylko wśród stopów `status==='planned'`**, trzymając
+rozwiązane (`delivered`/`failed`) na ich bezwzględnych pozycjach; istniejący
+RPC `reorder_route_stops` (`POST /api/routes/plan/reorder`) już przyjmuje
+pełną tablicę id, nie trzeba go zmieniać, tylko to, co UI do niego wysyła.
+(e) doklejenie nowej dostawy do **już aktywnego** planu bez resetowania całej
+trasy nie istnieje — dziś jedyna opcja w trakcie dnia to "Zmień dostawy", które
+kasuje/supersede'uje cały plan (`DELETE /api/routes/plan`); potrzebny osobny
+`POST /api/routes/plan/stops` doklejający jeden `route_stop` na koniec
+istniejącego aktywnego planu.
+
+Ręczna zmiana kolejności przystanków (strzałki góra/dół, dopóki trasa nie
+wystartowała) działa poprawnie — sprawdzone i potwierdzone 2026-08-02.
+Przycisk "Nawiguj" wcześniej wyglądał na zepsuty z innego powodu:
+`target="_blank"` na linku do Google Maps nic nie robi w trybie `standalone`
+PWA (`manifest.ts`) na iOS — usunięte.
 
 ### 5. `RESEND_API_KEY` — świadomie zaparkowane (**nie zaczynaj od nowa bez pytania Filipa**)
 
@@ -233,7 +266,11 @@ Kolejność, którą uważam za właściwą:
 3. ~~`RESEND_API_KEY`/`RESEND_FROM_EMAIL` w Vercelu~~ — **zaparkowane 2026-08-02**, patrz punkt 5 wyżej. Nie odgrzewaj bez pytania Filipa.
 4. **Przejście runbooka OCR na prawdziwych pismach** — poznanie realnej skuteczności.
 5. **Testy `extractMandateFields`**.
-6. **Planer tras** — podpiąć do bazy albo ukryć.
+6. ~~Planer tras — podpiąć do bazy albo ukryć~~ — zrobione, patrz punkt 4 wyżej.
+7. **Planer tras: blokada zajętego pojazdu + przypomnienie dla kierowcy + edycja
+   trasy w trakcie dnia** — zdiagnozowane 2026-08-03, plan i konkretne miejsca w
+   kodzie opisane w punkcie 4 wyżej i w `.agents/log.md` (wpis z 2026-08-03).
+   Nic jeszcze nie zaimplementowane — zacznij tu, to jest kolejka Filipa.
 
 Dalsze plany produktowe (lista automatyzacji od klienta: windykacja, rozliczenie
 zwrotu, serwisy, dyspozytornia, karty paliwowe, refaktura mandatów i e-TOLL,

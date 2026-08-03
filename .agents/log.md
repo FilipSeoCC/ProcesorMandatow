@@ -208,3 +208,102 @@ If this comes back up: the only two real options are (a) keep Supabase's default
 Filip asked how to handle mid-day route changes given the driver's Maps navigation always starts from their live GPS position — nothing implemented, this was explicitly a "write it up, don't build it" request.
 
 Key points if you pick this up: (1) route_stops.status already gives the dispatcher a coarse "where in the sequence" signal for free — don't rebuild that. (2) Maps omitting `origin` and using live GPS is correct behavior, not a bug — the actual gap is dispatcher-side visibility, not navigation. (3) True background GPS tracking is not achievable as a PWA (iOS Safari has no background geolocation for web content when the tab/PWA isn't foregrounded) — don't design around it without first deciding to build a native app. Recommended: Phase 1 = explicit one-shot "Zgłoś lokalizację" button + last-known-position display for the dispatcher, cheap and consent-clean. Phase 2 (foreground-only periodic ping, explicit toggle, visible indicator) only if Phase 1 proves insufficient in practice.
+
+## 2026-08-03 — Claude — Imię/nazwisko z rejestracji (sprawdzone, działa) + analiza: blokada zajętego pojazdu / przypomnienie dla kierowcy / edycja trasy w trakcie dnia (zdiagnozowane, nic jeszcze nie zaimplementowane)
+
+**Część 1 — zamknięta, bez zmian w kodzie.** Filip: "imię i nazwisko usera
+powinno być zaciągane z bazy z tego co wpisał przy rejestracji". Sprawdziłem
+cały łańcuch: `POST /api/auth` (signup) zapisuje `first_name`/`last_name` do
+`user_metadata` w Supabase Auth już przy rejestracji; `GET /api/team`
+(`src/app/api/team/route.ts:60-77`) czyta dokładnie z `user_metadata` przez
+Admin API; `employeeLabel()` w `workspace.tsx:461-465` poprawnie z tego
+korzysta wszędzie (Dokumenty, Sprawy, planer tras), z fallbackiem na e-mail
+tylko gdy `user_metadata` jest puste. Mechanizm już działa tak, jak Filip
+chce — surowe maile, które widział w filtrach, to konta bez wypełnionych
+metadanych (założone przed wdrożeniem zbierania imienia/nazwiska przy
+rejestracji, albo user nigdy nie wszedł w Ustawienia). Jedyny realny fast-follow,
+gdyby wrócił do tego: dać adminowi możliwość wpisania imienia/nazwiska za
+innego usera w panelu Pracownicy (dziś `PATCH /api/team` zmienia tylko rolę,
+nie imię) — nieproszony, nie zaczynaj bez pytania.
+
+**Część 2 — zdiagnozowana, zero kodu napisanego, przerwana brakiem limitu.**
+Filip: pojazd nie powinien dać się wybrać do nowej dostawy, dopóki ma
+nierozwiązaną poprzednią (potwierdził, że to pożądane zachowanie), ale nie
+może utknąć na zawsze bez powiadomienia kierowcy, a modyfikacja trasy po
+starcie dnia potrzebuje "sensownej logiki" zamiast pełnej blokady. Utworzyłem
+3 taski (Task tool, id #15/#16/#17 w tej sesji — nie przetrwają między
+sesjami, tylko dla porządku w tej rozmowie).
+
+Zanim zacząłem pisać kod, przeczytałem cały istniejący flow i **sporo już
+istnieje** — nie buduj tego od zera:
+
+- `PATCH /api/routes/plan/stops/[id]` (`src/app/api/routes/plan/stops/[id]/route.ts`)
+  już zapisuje `delivered`/`failed` na pojedynczym stopie i przy `delivered`
+  ustawia `delivery_orders.delivered_at`.
+- `POST /api/routes/plan/reorder` (`src/app/api/routes/plan/reorder/route.ts`)
+  już woła RPC `reorder_route_stops` z pełną tablicą id — generyczny
+  mechanizm, nie trzeba go zmieniać.
+- `delivery-planner.tsx` ma już gotowy UI potwierdzenia dostawy: `currentStop`
+  (pierwszy stop ze `status==='planned'`), sekcja "NAJBLIŻSZA DOSTAWA" z
+  przyciskami Auto wydane / Nie dostarczono / Przełóż na koniec, oraz modal
+  potwierdzenia (`pendingAction`, `confirmStopAction()`, linie ~956-1145).
+
+Czego brakuje — konkretny plan do zaimplementowania:
+
+1. **Blokada zajętego pojazdu** (dziś nic tego nie pilnuje). `GET
+   /api/fleet/vehicles` (`src/app/api/fleet/vehicles/route.ts`) ma dodać
+   `busy: boolean` — jeden dodatkowy fetch: `delivery_orders?select=vehicle_id
+   &organization_id=eq...&delivered_at=is.null`, zbudować `Set` zajętych id.
+   `POST /api/routes/deliveries` (`src/app/api/routes/deliveries/route.ts`)
+   ma po walidacji pojazdu sprawdzić, czy już ma otwartą dostawę i zwrócić 409
+   z czytelnym komunikatem. `delivery-planner.tsx`: `FleetVehicle` +`busy`,
+   disabled `<option>` z etykietą "(w trasie)" w pickerze (linie ~730-754).
+
+2. **Realny bug, znaleziony przy czytaniu kodu — to jest właściwa przyczyna
+   "auto może utknąć na zawsze" bardziej niż brak powiadomienia**: `GET`,
+   `POST` i `DELETE` w `src/app/api/routes/plan/route.ts` filtrują "aktywny
+   plan" po `planned_for=eq.<dzisiaj>`. Jeśli plan z wczoraj nie został
+   dokończony (nadal `status='active'`, ma stopy `'planned'`), **staje się
+   niewidoczny i niezarządzalny**: `GET` go nie zwróci (szuka tylko
+   dzisiejszego), "Zmień dostawy" (`DELETE`) go nie superseduje (to samo
+   filtrowanie), a jego pojazdy zostają zajęte bez żadnej ścieżki w UI do
+   odblokowania poza ręcznym SQL. Napraw usuwając filtr `planned_for` z tych
+   trzech miejsc — inwariant ma być "jeden aktywny plan na organizację", nie
+   "na dzień"; `planned_for` zostaje jako metadana zapisywana przy tworzeniu,
+   nie jako klucz zapytania. To samo naprawia "trasa przenosi się na kolejny
+   dzień, jeśli nieskończona" w sposób naturalny.
+
+3. **Przypomnienie dla kierowcy**: lekki endpoint zliczający `route_stops`
+   ze `status='planned'` (dowolny aktywny plan, po naprawie punktu 2 to już
+   tylko jeden na organizację) + badge w nawigacji `workspace.tsx` przy
+   "Planer tras" (wzorem badge'a "Błędy", `.navCount`, linie ~1379-1388) i/lub
+   w `NotificationsBell` (`workspace.tsx:2882`, dziś obsługuje tylko zgłoszenia
+   błędów — da się rozszerzyć o drugi typ powiadomienia). Po naprawie punktu 2
+   sam UI plannera (`currentStop` + modal) znów będzie widoczny przy każdym
+   wejściu niezależnie od tego, kiedy plan powstał — badge jest dodatkowym
+   nudge poza ekranem plannera, nie jedynym mechanizmem.
+
+4. **Reorder mid-route**: `move()` w `delivery-planner.tsx` (linia ~381) i
+   strzałki góra/dół w JSX (linia ~1030: `{!routeStarted && (...)}`) chowają
+   się całkowicie, gdy którykolwiek stop jest już rozwiązany. Trzeba pokazywać
+   strzałki dla stopów `status==='planned'` nawet gdy `routeStarted`, ale
+   reorder ma działać **tylko wśród `'planned'` stopów** — rozwiązane
+   (`delivered`/`failed`) zostają na swoich bezwzględnych pozycjach w tablicy
+   wysyłanej do `persistOrder()`/RPC. RPC się nie zmienia, zmienia się tylko
+   to, którą podtablicę UI mu wysyła.
+
+5. **Doklejenie nowej dostawy do aktywnego planu bez resetu całej trasy**:
+   dziś przy `plan` truthy ekran wyboru dostaw (`addStopButton`,
+   `addStopForm`) w ogóle się nie renderuje — jedyna opcja to "Zmień
+   dostawy" (`changeDeliveries()` → `DELETE /api/routes/plan`), które
+   supersedeuje cały plan. Potrzebny nowy `POST /api/routes/plan/stops`,
+   który: tworzy `delivery_orders` (reużyj logikę z `POST
+   /api/routes/deliveries`) i doklein `route_stops` na koniec **aktywnego**
+   planu (`position = max(position)+1`), bez supersedowania. UI: pokazać
+   przycisk "Dodaj dostawę" także na ekranie aktywnego planu, formularz
+   identyczny jak dziś, tylko inny endpoint docelowy gdy `plan` już istnieje.
+
+**Kolejność, w jakiej bym to robił**: najpierw punkt 2 (bug, mały zasięg,
+odblokowuje resztę), potem 1 (blokada, niezależna), potem 3 (badge, zależny
+od 2), na końcu 4 i 5 (UI, największy zasięg zmian w `delivery-planner.tsx`).
+Zero kodu z tego zostało napisane w tej sesji — tylko analiza i ten plan.
