@@ -334,3 +334,19 @@ New contributor on this repo, not just Claude/Codex — Michał opened GitHub PR
 - Clean merge, no conflicts — PR's base was exactly my current `main` tip, nothing else had landed in between.
 
 **Not yet verified live** — worth Filip trying the password-reset flow end to end once (the Supabase recovery email actually needs "Confirm email"-equivalent settings to be sane in the Supabase Auth dashboard; haven't checked those specifically for the recovery template).
+
+## 2026-08-03 — Claude — German/French/Spanish authority-sender detection (commit `fcaa002`)
+
+Filip's question ("nadawca jak jest po niemiecku jak ogarnąć?") turned into a real ask: fleet vehicles are always Polish-plated, but a mandate can still arrive from a foreign authority if the vehicle got fined abroad. `src/lib/authority-detection.ts` (fills the "nadawca" field) only had Polish institution patterns — added:
+
+- **DE**: Bußgeldstelle/Zentrale Bußgeldstelle, Landesamt für Zentrale Polizeiliche Dienste, Ordnungsamt, Polizeipräsidium/-direktion/-inspektion/-behörde, Regierungspräsidium.
+- **FR**: ANTAI (Agence Nationale de Traitement Automatisé des Infractions — the one that matters most, handles most automated French radar fines), Officier du Ministère Public, Préfecture, CACIR.
+- **ES**: DGT (Dirección General de Tráfico — the main one), Jefatura Provincial/Local de Tráfico, Ayuntamiento de <city>.
+
+Sender-name detection alone wasn't enough — `POSTAL_CODE`/`ADDRESS_START`/`SECTION_BOUNDARY`/the label-prefix regex in `nameFromLine()` were all Polish-only too, so even a matched authority name would fail to find its address or know where the sender block ends. Widened all four with the DE/FR/ES equivalents.
+
+**Caught before shipping**: the new short recipient-label tokens ("an"/"a"/"à", German/Spanish/French for "to:") are dangerously generic as bare prefixes — `an\s*[:：]?` with an optional trailing colon matches ANY line starting with those letters, including "Ayuntamiento" itself, one of the patterns just added two lines above it. Split those into their own alternation requiring the colon; tightened the pre-existing Polish "do" the same way for consistency (it had the identical latent risk, just never triggered).
+
+Verified with hand-written sample DE/FR/ES letter text (not a real scanned document) via `node --experimental-strip-types` — sender name detected correctly in all three. Two known rough edges on the **address** field only, not chased further since address was never the actual ask: German addresses that suffix the street type onto the name (e.g. "Rathausplatz" — doesn't match `ADDRESS_START`'s prefix-only patterns) won't get their street line; a French "CS" mailbox reference number can be mistaken for the postal code if it happens to be 5 digits (matched "41101" in "CS 41101" instead of the real "77000 Rennes"). Both are the same tier of best-effort imprecision the Polish path already accepts — flag if it ever matters enough to fix properly.
+
+`tsc --noEmit` and eslint both clean.

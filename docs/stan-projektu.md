@@ -57,6 +57,12 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
 - OCR pisma i ekstrakcja: numer rejestracyjny, data i **godzina** zdarzenia,
   numer sprawy, nadawca. Godzina ma znaczenie — pozwala rozróżnić dwa wydania
   tego samego auta w ciągu jednego dnia.
+- Rozpoznawanie nadawcy (`src/lib/authority-detection.ts`) obejmuje też
+  niemieckie, francuskie i hiszpańskie urzędy (Bußgeldstelle/Ordnungsamt,
+  ANTAI/Préfecture, DGT/Ayuntamiento) — numer rejestracyjny jest zawsze
+  polski, ale wezwanie może przyjść z zagranicy, jeśli auto dostało mandat
+  poza Polską. Adres nadawcy dla tych krajów jest heurystyczny (jak dla
+  polskich pism) — dokładność „best effort", nie 100%.
 - Automatyczne dopasowanie klienta po OCR oraz ręczne „Zmień dopasowanie".
 - Cykliczne dogrywanie dopasowań dla spraw, które nie trafiły za pierwszym razem
   (`/api/internal/documents/rematch`).
