@@ -189,9 +189,14 @@ export async function POST(request: Request) {
   const password = body?.password ?? "";
   const signingUp = body?.action === "sign-up";
   const minimumPasswordLength = signingUp ? 12 : 8;
-  if (!/^\S+@\S+\.\S+$/.test(email) || password.length < minimumPasswordLength)
+  if (!/^\S+@\S+\.\S+$/.test(email))
     return NextResponse.json(
-      { error: `Podaj poprawny e-mail i hasło mające minimum ${minimumPasswordLength} znaków.` },
+      { error: "Podaj poprawny adres e-mail." },
+      { status: 422 },
+    );
+  if (password.length < minimumPasswordLength)
+    return NextResponse.json(
+      { error: `Hasło musi mieć minimum ${minimumPasswordLength} znaków.` },
       { status: 422 },
     );
   const { url, publishableKey } = getSupabaseServerEnv();

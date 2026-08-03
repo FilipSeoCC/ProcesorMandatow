@@ -13,10 +13,16 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<"loading" | "guest" | "ready">(
     "loading",
   );
-  const [mode, setMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [mode, setMode] = useState<"sign-in" | "sign-up" | "reset">("sign-in");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  function switchMode(next: "sign-in" | "sign-up" | "reset") {
+    setMode(next);
+    setError(null);
+    setMessage(null);
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -43,6 +49,23 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setError(null);
     setMessage(null);
     const form = new FormData(event.currentTarget);
+
+    if (mode === "reset") {
+      const response = await fetch("/api/auth/reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.get("email") }),
+      });
+      const result = await response.json().catch(() => ({}));
+      setSubmitting(false);
+      if (!response.ok) {
+        setError(result.error || "Nie udało się wysłać linku do resetu hasła.");
+        return;
+      }
+      setMessage(result.message);
+      return;
+    }
+
     const response = await fetch("/api/auth", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -95,11 +118,19 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           <span>
             <LockKeyhole size={20} />
           </span>
-          <h1>{mode === "sign-in" ? "Zaloguj się" : "Utwórz konto"}</h1>
+          <h1>
+            {mode === "sign-in"
+              ? "Zaloguj się"
+              : mode === "sign-up"
+                ? "Utwórz konto"
+                : "Zresetuj hasło"}
+          </h1>
           <p>
             {mode === "sign-in"
               ? "Uzyskaj dostęp do dokumentów, floty i tras dostaw."
-              : "Utwórz konto, aby uzyskać dostęp do dokumentów, floty i tras dostaw."}
+              : mode === "sign-up"
+                ? "Utwórz konto, aby uzyskać dostęp do dokumentów, floty i tras dostaw."
+                : "Podaj adres e-mail konta — wyślemy na niego link do ustawienia nowego hasła."}
           </p>
         </div>
         <form onSubmit={submit}>
@@ -135,18 +166,30 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               inputMode="email"
             />
           </label>
-          <label>
-            Hasło
-            <input
-              name="password"
-              type="password"
-              required
-              minLength={8}
-              autoComplete={
-                mode === "sign-in" ? "current-password" : "new-password"
-              }
-            />
-          </label>
+          {mode !== "reset" && (
+            <label>
+              Hasło
+              <input
+                name="password"
+                type="password"
+                required
+                minLength={mode === "sign-up" ? 12 : 8}
+                autoComplete={
+                  mode === "sign-in" ? "current-password" : "new-password"
+                }
+              />
+            </label>
+          )}
+          {mode === "sign-up" && <p className={styles.hint}>Minimum 12 znaków.</p>}
+          {mode === "sign-in" && (
+            <button
+              type="button"
+              className={styles.forgot}
+              onClick={() => switchMode("reset")}
+            >
+              Nie pamiętasz hasła?
+            </button>
+          )}
           {mode === "sign-up" && (
             <label className={styles.consentLabel}>
               <input type="checkbox" name="consent" required />
@@ -183,20 +226,22 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
               ? "Łączenie…"
               : mode === "sign-in"
                 ? "Zaloguj bezpiecznie"
-                : "Utwórz konto"}
+                : mode === "sign-up"
+                  ? "Utwórz konto"
+                  : "Wyślij link do resetu hasła"}
           </button>
         </form>
         <button
           className={styles.switch}
-          onClick={() => {
-            setMode(mode === "sign-in" ? "sign-up" : "sign-in");
-            setError(null);
-            setMessage(null);
-          }}
+          onClick={() =>
+            switchMode(mode === "sign-up" ? "sign-in" : mode === "reset" ? "sign-in" : "sign-up")
+          }
         >
           {mode === "sign-in"
             ? "Nie masz konta? Utwórz pierwsze konto"
-            : "Masz już konto? Zaloguj się"}
+            : mode === "sign-up"
+              ? "Masz już konto? Zaloguj się"
+              : "Wróć do logowania"}
         </button>
         <footer>
           <ShieldCheck size={15} />
