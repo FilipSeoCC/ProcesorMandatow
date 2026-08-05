@@ -1,0 +1,15 @@
+.header {
+  padding: 4px 2px 18px;
+}
+.header > span {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #64748b;
+  font-weight: 800;
+}
+.header h1 {
+  font-size: 24px;
+  letter-spacing: -0.04em;
+  margin: 6px 0 0;
+}
