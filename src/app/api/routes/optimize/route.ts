@@ -5,11 +5,24 @@ import { gcpWorkloadIdentityClient } from "@/lib/gcp-oidc";
 export const runtime = "nodejs";
 
 type Point = { latitude: number; longitude: number };
-type StopInput = Point & { id: string; customer: string; address: string; serviceMinutes: number; priority: number };
-type OptimizeInput = { depot: Point & { address: string }; returnToDepot?: boolean; stops: StopInput[] };
+type StopInput = Point & { id: string; customer: string; address: string; serviceMinutes: number; priority: number; windowStart?: string; windowEnd?: string };
+type OptimizeInput = { depot: Point & { address: string }; returnToDepot?: boolean; stops: StopInput[]; employeeLabel?: string };
 
 function coordinate(value: unknown, min: number, max: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
+}
+
+function isoTimestamp(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && !Number.isNaN(Date.parse(value));
+}
+
+function validWindow(stop: Partial<StopInput>) {
+  if (stop.windowStart === undefined && stop.windowEnd === undefined) return true;
+  if (stop.windowStart !== undefined && !isoTimestamp(stop.windowStart)) return false;
+  if (stop.windowEnd !== undefined && !isoTimestamp(stop.windowEnd)) return false;
+  if (stop.windowStart !== undefined && stop.windowEnd !== undefined)
+    return Date.parse(stop.windowStart) <= Date.parse(stop.windowEnd);
+  return true;
 }
 
 function valid(body: unknown): body is OptimizeInput {
@@ -17,7 +30,8 @@ function valid(body: unknown): body is OptimizeInput {
   const input = body as Partial<OptimizeInput>;
   if (!input.depot || !Array.isArray(input.stops) || input.stops.length < 2 || input.stops.length > 20) return false;
   if (!coordinate(input.depot.latitude, -90, 90) || !coordinate(input.depot.longitude, -180, 180)) return false;
-  return input.stops.every((stop) => typeof stop?.id === "string" && stop.id.length <= 80 && typeof stop.customer === "string" && stop.customer.length <= 160 && typeof stop.address === "string" && stop.address.length <= 300 && coordinate(stop.latitude, -90, 90) && coordinate(stop.longitude, -180, 180) && Number.isFinite(stop.serviceMinutes) && stop.serviceMinutes >= 0 && stop.serviceMinutes <= 240 && Number.isFinite(stop.priority) && stop.priority >= 1 && stop.priority <= 5);
+  if (input.employeeLabel !== undefined && (typeof input.employeeLabel !== "string" || input.employeeLabel.length > 160)) return false;
+  return input.stops.every((stop) => typeof stop?.id === "string" && stop.id.length <= 80 && typeof stop.customer === "string" && stop.customer.length <= 160 && typeof stop.address === "string" && stop.address.length <= 300 && coordinate(stop.latitude, -90, 90) && coordinate(stop.longitude, -180, 180) && Number.isFinite(stop.serviceMinutes) && stop.serviceMinutes >= 0 && stop.serviceMinutes <= 240 && Number.isFinite(stop.priority) && stop.priority >= 1 && stop.priority <= 5 && validWindow(stop));
 }
 
 function distanceKm(a: Point, b: Point) {
@@ -62,7 +76,7 @@ export async function POST(request: Request) {
   const now = new Date();
   const depotLocation = { latitude: body.depot.latitude, longitude: body.depot.longitude };
   const wholeSecondIso = (date: Date) => date.toISOString().replace(/\.\d+Z$/, "Z");
-  const googleRequest = { model: { globalStartTime: wholeSecondIso(now), globalEndTime: wholeSecondIso(new Date(now.getTime() + 16 * 60 * 60 * 1000)), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s` }] })), vehicles: [{ label: "Wadim", startLocation: depotLocation, ...(body.returnToDepot === false ? {} : { endLocation: depotLocation }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
+  const googleRequest = { model: { globalStartTime: wholeSecondIso(now), globalEndTime: wholeSecondIso(new Date(now.getTime() + 16 * 60 * 60 * 1000)), shipments: body.stops.map((stop) => ({ label: stop.id, penaltyCost: stop.priority * 1000, deliveries: [{ arrivalLocation: { latitude: stop.latitude, longitude: stop.longitude }, duration: `${stop.serviceMinutes * 60}s`, ...(stop.windowStart ? { timeWindows: [{ startTime: wholeSecondIso(new Date(stop.windowStart)), endTime: wholeSecondIso(new Date(stop.windowEnd ?? stop.windowStart)) }] } : {}) }] })), vehicles: [{ label: body.employeeLabel?.trim() || "Trasa", startLocation: depotLocation, ...(body.returnToDepot === false ? {} : { endLocation: depotLocation }), costPerKilometer: 1, costPerTraveledHour: 25 }] }, populatePolylines: false };
   try {
     // Route Optimization API doesn't accept API keys — it requires a full
     // OAuth2/IAM principal, so we reuse the same WIF client as Document AI.

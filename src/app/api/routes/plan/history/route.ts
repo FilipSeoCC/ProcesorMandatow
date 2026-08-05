@@ -14,6 +14,7 @@ type PlanRow = {
   distance_meters: number | null;
   duration_seconds: number | null;
   dispatcher_id: string | null;
+  assigned_user_id: string | null;
   created_at: string;
 };
 type StopRow = { route_plan_id: string; status: string };
@@ -34,7 +35,7 @@ export async function GET(request: Request) {
   const headers = adminHeaders(secretKey);
 
   const plansResponse = await fetch(
-    `${url}/rest/v1/route_plans?select=id,planned_for,status,optimization_source,distance_meters,duration_seconds,dispatcher_id,created_at&organization_id=eq.${member.organizationId}&order=created_at.desc&limit=30`,
+    `${url}/rest/v1/route_plans?select=id,planned_for,status,optimization_source,distance_meters,duration_seconds,dispatcher_id,assigned_user_id,created_at&organization_id=eq.${member.organizationId}&order=created_at.desc&limit=30`,
     { headers, cache: "no-store" },
   );
   if (!plansResponse.ok)
@@ -69,6 +70,7 @@ export async function GET(request: Request) {
         status: plan.status,
         mode: plan.optimization_source,
         dispatcherId: plan.dispatcher_id,
+        assignedUserId: plan.assigned_user_id,
         createdAt: plan.created_at,
         distanceKm: plan.distance_meters ? Math.round(plan.distance_meters / 1000) : 0,
         durationMinutes: plan.duration_seconds ? Math.round(plan.duration_seconds / 60) : 0,

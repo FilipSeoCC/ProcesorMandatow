@@ -11,6 +11,16 @@ function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+// Every employee now gets their own route for the day (assigned_user_id),
+// not one shared org-wide plan — defaults to the caller's own route;
+// ?userId= lets a dispatcher pull up someone else's (any org member can
+// view any other member's route today, same trust level the old shared
+// plan had — see supabase-auth.ts's comment on the 3-role model).
+async function resolveAssignedUserId(request: Request, member: { userId: string }) {
+  const requested = new URL(request.url).searchParams.get("userId");
+  return requested?.trim() || member.userId;
+}
+
 export async function GET(request: Request) {
   const member = await verifyMember(request, [...roles]);
   if (!member)
@@ -21,9 +31,10 @@ export async function GET(request: Request) {
       { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
+  const assignedUserId = await resolveAssignedUserId(request, member);
   const today = new Date().toISOString().slice(0, 10);
   const planResponse = await fetch(
-    `${url}/rest/v1/route_plans?select=id,start_address,start_latitude,start_longitude,optimization_source,distance_meters,duration_seconds&organization_id=eq.${member.organizationId}&planned_for=eq.${today}&status=eq.active&order=created_at.desc&limit=1`,
+    `${url}/rest/v1/route_plans?select=id,start_address,start_latitude,start_longitude,optimization_source,distance_meters,duration_seconds&organization_id=eq.${member.organizationId}&planned_for=eq.${today}&status=eq.active&assigned_user_id=eq.${encodeURIComponent(assignedUserId)}&order=created_at.desc&limit=1`,
     { headers: adminHeaders(secretKey), cache: "no-store" },
   );
   if (!planResponse.ok)
@@ -49,6 +60,7 @@ export async function POST(request: Request) {
   const stopOrder = Array.isArray(body?.stopOrder)
     ? (body.stopOrder as unknown[]).filter((item): item is string => typeof item === "string")
     : [];
+  const assignedUserId = text(body?.assignedUserId, 64) || member.userId;
   if (
     !startAddress ||
     !Number.isFinite(startLatitude) ||
@@ -70,11 +82,24 @@ export async function POST(request: Request) {
   const jsonHeaders = { ...headers, "Content-Type": "application/json" };
   const today = new Date().toISOString().slice(0, 10);
 
-  // One active plan per org per day. Older ones aren't deleted (they may
-  // already have delivery history on their stops) — just superseded, so GET
-  // never picks them up again.
+  if (assignedUserId !== member.userId) {
+    const memberCheck = await fetch(
+      `${url}/rest/v1/organization_members?select=user_id&organization_id=eq.${member.organizationId}&user_id=eq.${encodeURIComponent(assignedUserId)}&status=eq.active&limit=1`,
+      { headers, cache: "no-store" },
+    );
+    const matches = memberCheck.ok ? ((await memberCheck.json()) as unknown[]) : [];
+    if (!matches.length)
+      return NextResponse.json(
+        { error: "Wskazany pracownik nie należy do organizacji." },
+        { status: 422 },
+      );
+  }
+
+  // One active plan per employee per day. Older ones aren't deleted (they
+  // may already have delivery history on their stops) — just superseded, so
+  // GET never picks them up again.
   await fetch(
-    `${url}/rest/v1/route_plans?organization_id=eq.${member.organizationId}&planned_for=eq.${today}&status=eq.active`,
+    `${url}/rest/v1/route_plans?organization_id=eq.${member.organizationId}&planned_for=eq.${today}&status=eq.active&assigned_user_id=eq.${encodeURIComponent(assignedUserId)}`,
     {
       method: "PATCH",
       headers: { ...jsonHeaders, Prefer: "return=minimal" },
@@ -89,6 +114,7 @@ export async function POST(request: Request) {
       organization_id: member.organizationId,
       planned_for: today,
       dispatcher_id: member.userId,
+      assigned_user_id: assignedUserId,
       start_address: startAddress,
       start_latitude: startLatitude,
       start_longitude: startLongitude,
@@ -153,9 +179,10 @@ export async function DELETE(request: Request) {
       { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
       { status: 503 },
     );
+  const assignedUserId = await resolveAssignedUserId(request, member);
   const today = new Date().toISOString().slice(0, 10);
   await fetch(
-    `${url}/rest/v1/route_plans?organization_id=eq.${member.organizationId}&planned_for=eq.${today}&status=eq.active`,
+    `${url}/rest/v1/route_plans?organization_id=eq.${member.organizationId}&planned_for=eq.${today}&status=eq.active&assigned_user_id=eq.${encodeURIComponent(assignedUserId)}`,
     {
       method: "PATCH",
       headers: {

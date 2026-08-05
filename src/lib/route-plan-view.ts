@@ -14,6 +14,7 @@ export type PlanRow = {
   planned_for?: string;
   status?: string;
   dispatcher_id?: string | null;
+  assigned_user_id?: string | null;
   created_at?: string;
 };
 type StopRow = {
@@ -31,6 +32,8 @@ type DeliveryRow = {
   latitude: number;
   longitude: number;
   service_minutes: number;
+  window_start: string | null;
+  window_end: string | null;
 };
 type VehicleRow = { id: string; brand: string; model: string; registration_number: string };
 type CustomerRow = { id: string; name: string };
@@ -50,7 +53,7 @@ export async function loadPlanView(
   const deliveryIds = stops.map((stop) => stop.delivery_order_id);
   const deliveriesResponse = deliveryIds.length
     ? await fetch(
-        `${url}/rest/v1/delivery_orders?select=id,vehicle_id,customer_id,address,latitude,longitude,service_minutes&organization_id=eq.${organizationId}&id=in.(${deliveryIds.join(",")})`,
+        `${url}/rest/v1/delivery_orders?select=id,vehicle_id,customer_id,address,latitude,longitude,service_minutes,window_start,window_end&organization_id=eq.${organizationId}&id=in.(${deliveryIds.join(",")})`,
         { headers, cache: "no-store" },
       )
     : null;
@@ -94,6 +97,7 @@ export async function loadPlanView(
     plannedFor: plan.planned_for,
     status: plan.status,
     dispatcherId: plan.dispatcher_id ?? null,
+    assignedUserId: plan.assigned_user_id ?? null,
     createdAt: plan.created_at,
     distanceKm: plan.distance_meters ? Math.round(plan.distance_meters / 1000) : 0,
     durationMinutes: plan.duration_seconds ? Math.round(plan.duration_seconds / 60) : 0,
@@ -113,6 +117,8 @@ export async function loadPlanView(
         latitude: delivery?.latitude ?? 0,
         longitude: delivery?.longitude ?? 0,
         serviceMinutes: delivery?.service_minutes ?? 0,
+        windowStart: delivery?.window_start ?? null,
+        windowEnd: delivery?.window_end ?? null,
       };
     }),
   };

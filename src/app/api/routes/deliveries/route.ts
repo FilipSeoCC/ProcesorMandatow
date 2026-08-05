@@ -10,6 +10,11 @@ function text(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().slice(0, max) : "";
 }
 
+function isoTimestampOrNull(value: unknown) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
+}
+
 type DeliveryRow = {
   id: string;
   vehicle_id: string;
@@ -19,6 +24,8 @@ type DeliveryRow = {
   longitude: number;
   service_minutes: number;
   priority: number;
+  window_start: string | null;
+  window_end: string | null;
 };
 type VehicleRow = { id: string; brand: string; model: string; registration_number: string };
 type CustomerRow = { id: string; name: string; email?: string };
@@ -38,7 +45,7 @@ export async function GET(request: Request) {
   // delivered_at is null: still needs planning. A failed attempt leaves it
   // null on purpose — the delivery is retryable, not done.
   const deliveriesResponse = await fetch(
-    `${url}/rest/v1/delivery_orders?select=id,vehicle_id,customer_id,address,latitude,longitude,service_minutes,priority&organization_id=eq.${member.organizationId}&delivered_at=is.null&order=created_at.asc`,
+    `${url}/rest/v1/delivery_orders?select=id,vehicle_id,customer_id,address,latitude,longitude,service_minutes,priority,window_start,window_end&organization_id=eq.${member.organizationId}&delivered_at=is.null&order=created_at.asc`,
     { headers, cache: "no-store" },
   );
   if (!deliveriesResponse.ok)
@@ -90,6 +97,8 @@ export async function GET(request: Request) {
         longitude: item.longitude,
         serviceMinutes: item.service_minutes,
         priority: item.priority,
+        windowStart: item.window_start,
+        windowEnd: item.window_end,
       };
     }),
   });
@@ -107,6 +116,8 @@ export async function POST(request: Request) {
   const longitude = Number(body?.longitude);
   const serviceMinutes = Number(body?.serviceMinutes);
   const priority = Number(body?.priority);
+  const windowStart = isoTimestampOrNull(body?.windowStart);
+  const windowEnd = isoTimestampOrNull(body?.windowEnd);
   if (
     !vehicleId ||
     !customerName ||
@@ -115,7 +126,10 @@ export async function POST(request: Request) {
     !Number.isFinite(longitude) ||
     !Number.isFinite(serviceMinutes) ||
     serviceMinutes < 0 ||
-    serviceMinutes > 240
+    serviceMinutes > 240 ||
+    windowStart === undefined ||
+    windowEnd === undefined ||
+    (windowStart && windowEnd && Date.parse(windowStart) > Date.parse(windowEnd))
   )
     return NextResponse.json(
       { error: "Uzupełnij pojazd, klienta, adres i czas obsługi." },
@@ -177,6 +191,8 @@ export async function POST(request: Request) {
       longitude,
       service_minutes: Math.round(serviceMinutes),
       priority: Math.min(5, Math.max(1, Math.round(priority) || 3)),
+      window_start: windowStart,
+      window_end: windowEnd,
     }),
   });
   if (!createDelivery.ok) {
