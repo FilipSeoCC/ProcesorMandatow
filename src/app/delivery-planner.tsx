@@ -23,6 +23,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { buildNavigation } from "@/lib/navigation-url";
 import styles from "./delivery-planner.module.css";
 
 type Delivery = {
@@ -576,39 +577,8 @@ export default function DeliveryPlanner({
     }
   }
 
-  // Navigate to the address, not to raw coordinates. Google reverse-geocodes a
-  // bare lat/lng to the nearest named place, so the driver was shown things
-  // like a school instead of "Postępu 14" and could not tell whether the pin
-  // was right. The address here is Google's own formatted_address from the
-  // geocoding step, so it resolves back to the same point.
-  // One navigation link covering everything still to deliver, in the order we
-  // optimized — sending only the next stop threw away the whole point of
-  // planning the route. Addresses rather than raw lat/lng, because Google
-  // reverse-geocodes bare coordinates to the nearest named place and the
-  // driver ends up staring at some unrelated building.
-  const mapsPoint = (stop: { address: string; latitude: number; longitude: number }) =>
-    stop.address?.trim() || `${stop.latitude},${stop.longitude}`;
   const remainingStops = ordered.filter((item) => item.status === "planned");
-  // Google's URL API accepts at most 9 intermediate waypoints; beyond that it
-  // silently drops the tail, so we hand over one batch and the driver reopens
-  // the link once those are done.
-  const WAYPOINT_LIMIT = 9;
-  const navigationUrl = (() => {
-    if (!remainingStops.length) return "";
-    const capped = remainingStops.slice(0, WAYPOINT_LIMIT + 1);
-    const destination = mapsPoint(capped[capped.length - 1]);
-    const waypoints = capped.slice(0, -1).map(mapsPoint);
-    const base = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(
-      destination,
-    )}&travelmode=driving`;
-    return waypoints.length
-      ? `${base}&waypoints=${encodeURIComponent(waypoints.join("|"))}`
-      : `${base}&dir_action=navigate`;
-  })();
-  const navigationLabel =
-    remainingStops.length > 1
-      ? `Nawiguj całą trasą (${Math.min(remainingStops.length, WAYPOINT_LIMIT + 1)})`
-      : "Nawiguj do klienta";
+  const { url: navigationUrl, label: navigationLabel } = buildNavigation(remainingStops);
 
   const busy = deliveriesLoading || planLoading;
 
