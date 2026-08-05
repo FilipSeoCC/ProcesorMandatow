@@ -20,7 +20,7 @@ export async function GET(
       { status: 503 },
     );
   const planResponse = await fetch(
-    `${url}/rest/v1/route_plans?select=id,start_address,start_latitude,start_longitude,optimization_source,distance_meters,duration_seconds,planned_for,status,dispatcher_id,created_at&organization_id=eq.${member.organizationId}&id=eq.${encodeURIComponent(id)}&limit=1`,
+    `${url}/rest/v1/route_plans?select=id,start_address,start_latitude,start_longitude,optimization_source,distance_meters,duration_seconds,planned_for,status,dispatcher_id,assigned_user_id,created_at&organization_id=eq.${member.organizationId}&id=eq.${encodeURIComponent(id)}&limit=1`,
     { headers: adminHeaders(secretKey), cache: "no-store" },
   );
   if (!planResponse.ok)

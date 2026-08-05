@@ -96,6 +96,19 @@ function dateNear(text: string, labels: RegExp, withTime = false) {
   return null;
 }
 
+// A blank frame, wrong-side photo, or badly blurred shot produces close to
+// no OCR text at all — that's a fundamentally different problem than "some
+// fields missing" (needs_review, where OCR read the document but a value
+// wasn't found) and needs its own message telling the user to retake the
+// photo rather than fill fields in by hand. A real mandate letter's body
+// text runs into the hundreds of characters, so this floor only trips on
+// genuinely unreadable captures.
+const MIN_READABLE_TEXT_LENGTH = 40;
+
+function isDocumentReadable(rawText: string) {
+  return rawText.trim().length >= MIN_READABLE_TEXT_LENGTH;
+}
+
 export function extractMandateFields(rawText: string): ExtractedFields {
   const text = rawText.replace(/\r/g, "").replace(/[ \t]+/g, " ");
   // "rej\.?" also matches the common abbreviation "nr rej." — documents
@@ -253,6 +266,27 @@ export async function processMandateOcr(
     await markMandateOcrProcessing(documentId);
     const pageTexts = await Promise.all(files.map(readWithDocumentAi));
     const rawText = pageTexts.join("\n\n--- PAGE ---\n\n").trim();
+
+    if (!isDocumentReadable(rawText)) {
+      await updateDocument(documentId, {
+        status: "retake_required",
+        ocr_text: rawText,
+        registration_number: null,
+        event_at: null,
+        letter_date: null,
+        case_number: null,
+        sender: null,
+        extraction_confidence: {},
+        ocr_error:
+          "Zdjęcie jest nieczytelne lub nie zawiera dokumentu — zrób nowe zdjęcie w dobrym oświetleniu, obejmując całą stronę.",
+        processed_at: new Date().toISOString(),
+        responsible_name: "",
+        responsible_tax_id: "",
+        responsible_email: "",
+      });
+      return;
+    }
+
     const fields = extractMandateFields(rawText);
     const ready = Boolean(fields.registrationNumber && fields.eventAt);
 

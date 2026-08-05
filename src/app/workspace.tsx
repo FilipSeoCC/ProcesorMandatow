@@ -659,7 +659,8 @@ export default function MandatyWorkspace() {
           ? "Zweryfikowana"
           : document.status === "ready" ||
               document.status === "needs_review" ||
-              document.status === "ocr_failed"
+              document.status === "ocr_failed" ||
+              document.status === "retake_required"
             ? "Do weryfikacji"
             : "Nowa",
       customer: document.responsible_name || "—",
@@ -693,7 +694,9 @@ export default function MandatyWorkspace() {
         success,
         message: success
           ? `OCR zakończony sukcesem: ${justFinished.caseNumber}`
-          : `Analiza OCR nie powiodła się: ${justFinished.caseNumber}`,
+          : justFinished.ocrStatus === "retake_required"
+            ? `Zdjęcie nieczytelne, zrób je ponownie: ${justFinished.caseNumber}`
+            : `Analiza OCR nie powiodła się: ${justFinished.caseNumber}`,
       });
     }
     setCaseItems(mapped);
@@ -1575,7 +1578,12 @@ export default function MandatyWorkspace() {
             onCancelRole={() => setTeamPending(null)}
           />
         ) : activeView === "routes" ? (
-          <DeliveryPlanner employeeLabel={employeeLabel} currentUserName={accountDisplayName(account)} />
+          <DeliveryPlanner
+            employeeLabel={employeeLabel}
+            currentUserName={accountDisplayName(account)}
+            currentUserId={account?.userId}
+            team={team}
+          />
         ) : activeView === "branches" ? (
           <Branches />
         ) : activeView === "bugs" ? (
@@ -1962,7 +1970,9 @@ export default function MandatyWorkspace() {
                                 ? "Analiza zakończona"
                                 : selected.ocrStatus === "needs_review"
                                   ? "Wymaga weryfikacji"
-                                  : "Analiza nie powiodła się"}
+                                  : selected.ocrStatus === "retake_required"
+                                    ? "Zdjęcie nieczytelne"
+                                    : "Analiza nie powiodła się"}
                         </strong>
                       </span>
                       <small>
@@ -1974,9 +1984,11 @@ export default function MandatyWorkspace() {
                               ? "Dane OCR gotowe do weryfikacji"
                               : selected.ocrStatus === "needs_review"
                                 ? "Część danych nie została rozpoznana — uzupełnij ręcznie poniżej"
-                                : "Nie udało się odczytać dokumentu"}
+                                : selected.ocrStatus === "retake_required"
+                                  ? "Nie rozpoznaliśmy żadnych danych na zdjęciu — zrób nowe zdjęcie w dobrym oświetleniu, obejmując całą stronę, usuń tę sprawę i dodaj dokument ponownie"
+                                  : "Nie udało się odczytać dokumentu"}
                       </small>
-                      {selected.documentId && (
+                      {selected.documentId && selected.ocrStatus !== "retake_required" && (
                         <button
                           type="button"
                           className={styles.textButtonFramed}
