@@ -35,6 +35,8 @@ type Delivery = {
   longitude: number;
   serviceMinutes: number;
   priority: number;
+  windowStart: string | null;
+  windowEnd: string | null;
 };
 type PlanStop = {
   stopId: string;
@@ -47,6 +49,8 @@ type PlanStop = {
   serviceMinutes: number;
   status: "planned" | "delivered" | "failed";
   notes: string;
+  windowStart: string | null;
+  windowEnd: string | null;
 };
 type Plan = {
   id: string;
@@ -56,6 +60,7 @@ type Plan = {
   durationMinutes: number;
   stops: PlanStop[];
 };
+type TeamMember = { userId: string; role: string; status: string; email: string | null; name: string | null };
 type OptimizeWarning = { skippedCustomers: string[]; warning?: string };
 type FleetVehicle = {
   id: string;
@@ -70,6 +75,7 @@ type HistoryPlanSummary = {
   status: string;
   mode: string;
   dispatcherId: string | null;
+  assignedUserId: string | null;
   createdAt: string;
   distanceKm: number;
   durationMinutes: number;
@@ -97,6 +103,22 @@ const depot = {
   longitude: 20.91054,
 };
 
+// Deliveries are always "for today," so the add-delivery form only asks for
+// a time of day — combine it with today's date to get the full timestamp
+// window_start/window_end actually need.
+function todayAt(time: string) {
+  if (!time) return undefined;
+  return new Date(`${new Date().toISOString().slice(0, 10)}T${time}:00`).toISOString();
+}
+
+function formatWindow(windowStart: string | null, windowEnd: string | null) {
+  if (!windowStart && !windowEnd) return null;
+  const time = (value: string) =>
+    new Date(value).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" });
+  if (windowStart && windowEnd) return `${time(windowStart)}–${time(windowEnd)}`;
+  return time(windowStart || windowEnd!);
+}
+
 function storedAccessToken() {
   for (let index = 0; index < localStorage.length; index++) {
     const key = localStorage.key(index);
@@ -120,9 +142,13 @@ function authHeaders() {
 export default function DeliveryPlanner({
   employeeLabel,
   currentUserName,
+  currentUserId,
+  team = [],
 }: {
   employeeLabel?: (userId?: string | null) => string;
   currentUserName?: string;
+  currentUserId?: string | null;
+  team?: TeamMember[];
 }) {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [deliveriesLoading, setDeliveriesLoading] = useState(true);
@@ -140,7 +166,14 @@ export default function DeliveryPlanner({
     address: "",
     serviceMinutes: "20",
     priority: "3",
+    windowStart: "",
+    windowEnd: "",
   });
+  // Every employee now gets their own route for the day — this is "whose
+  // route today," defaulting to the person using the planner. Only shown as
+  // a picker once there's actually more than one active team member.
+  const [assignedUserId, setAssignedUserId] = useState(currentUserId ?? "");
+  const activeTeam = team.filter((member) => member.status === "active");
   const [geocoding, setGeocoding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [uncertainGeocode, setUncertainGeocode] = useState<{
@@ -191,10 +224,11 @@ export default function DeliveryPlanner({
     }
   }
 
-  async function loadPlan() {
+  async function loadPlan(forUserId?: string) {
     setPlanLoading(true);
     try {
-      const response = await fetch("/api/routes/plan", {
+      const query = forUserId ? `?userId=${encodeURIComponent(forUserId)}` : "";
+      const response = await fetch(`/api/routes/plan${query}`, {
         headers: authHeaders(),
         cache: "no-store",
       });
@@ -208,12 +242,24 @@ export default function DeliveryPlanner({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount pattern used throughout this codebase
     loadDeliveries();
-    loadPlan();
     fetch("/api/fleet/vehicles", { headers: authHeaders(), cache: "no-store" })
       .then((response) => response.json())
       .then((data) => setFleetVehicles(data.vehicles ?? []))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    // currentUserId often resolves after this component mounts (parent's own
+    // account fetch) — pick it up as the default assignee without clobbering
+    // a dispatcher's already-made manual selection.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- syncing a default from a prop that resolves after mount, same pattern as elsewhere in this file
+    if (currentUserId) setAssignedUserId((current) => current || currentUserId);
+  }, [currentUserId]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reload the right employee's route whenever the selection changes
+    loadPlan(assignedUserId || undefined);
+  }, [assignedUserId]);
 
   async function loadHistory() {
     setHistoryLoading(true);
@@ -266,6 +312,10 @@ export default function DeliveryPlanner({
       setAddError("Czas obsługi musi być liczbą od 0 do 240 minut.");
       return;
     }
+    if (addForm.windowStart && addForm.windowEnd && addForm.windowStart > addForm.windowEnd) {
+      setAddError("Okno czasowe „od” musi być wcześniejsze niż „do”.");
+      return;
+    }
     setGeocoding(true);
     setAddError(null);
     try {
@@ -310,6 +360,8 @@ export default function DeliveryPlanner({
           longitude: resolved.longitude,
           serviceMinutes,
           priority: Math.min(5, Math.max(1, priority || 3)),
+          windowStart: todayAt(addForm.windowStart),
+          windowEnd: todayAt(addForm.windowEnd),
         }),
       });
       const createData = await createResponse.json().catch(() => ({}));
@@ -333,6 +385,8 @@ export default function DeliveryPlanner({
         address: "",
         serviceMinutes: "20",
         priority: "3",
+        windowStart: "",
+        windowEnd: "",
       });
       setAddOpen(false);
     } catch (reason) {
@@ -449,10 +503,14 @@ export default function DeliveryPlanner({
     setLoading(true);
     setError(null);
     try {
+      const assigneeLabel =
+        assignedUserId && assignedUserId !== currentUserId
+          ? employeeLabel?.(assignedUserId)
+          : currentUserName;
       const response = await fetch("/api/routes/optimize", {
         method: "POST",
         headers: authHeaders(),
-        body: JSON.stringify({ depot, returnToDepot: true, stops }),
+        body: JSON.stringify({ depot, returnToDepot: true, stops, employeeLabel: assigneeLabel }),
       });
       const data = await response.json();
       if (!response.ok)
@@ -474,6 +532,7 @@ export default function DeliveryPlanner({
           durationSeconds: data.durationMinutes * 60,
           optimizationSource: data.mode,
           stopOrder: data.orderedStopIds,
+          assignedUserId: assignedUserId || undefined,
         }),
       });
       const saveData = await saveResponse.json().catch(() => ({}));
@@ -506,7 +565,8 @@ export default function DeliveryPlanner({
   async function changeDeliveries() {
     setChangingDeliveries(true);
     try {
-      await fetch("/api/routes/plan", { method: "DELETE", headers: authHeaders() });
+      const query = assignedUserId ? `?userId=${encodeURIComponent(assignedUserId)}` : "";
+      await fetch(`/api/routes/plan${query}`, { method: "DELETE", headers: authHeaders() });
       setPlan(null);
       setOptimizeWarning(null);
       setRouteDirty(false);
@@ -562,6 +622,22 @@ export default function DeliveryPlanner({
         <p>
           Wybierz auta z placu, a system ułoży możliwie krótką kolejność dostaw.
         </p>
+        {activeTeam.length > 1 && (
+          <label className={styles.assigneePicker}>
+            Trasa dla
+            <select
+              value={assignedUserId}
+              onChange={(event) => setAssignedUserId(event.target.value)}
+            >
+              {activeTeam.map((member) => (
+                <option key={member.userId} value={member.userId}>
+                  {(member.name || member.email || "Nieznany") +
+                    (member.userId === currentUserId ? " (Ja)" : "")}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <div>
           <span>
             <CarFront size={18} />
@@ -616,7 +692,7 @@ export default function DeliveryPlanner({
                       })}
                     </strong>
                     <small>
-                      Zaplanował: {employeeLabel ? employeeLabel(item.dispatcherId) : "—"} ·{" "}
+                      Kierowca: {employeeLabel ? employeeLabel(item.assignedUserId) : "—"} ·{" "}
                       {item.distanceKm} km · {Math.floor(item.durationMinutes / 60)} h{" "}
                       {item.durationMinutes % 60} min
                     </small>
@@ -838,6 +914,34 @@ export default function DeliveryPlanner({
                     />
                   </label>
                 </div>
+                <div className={styles.addStopRow}>
+                  <label>
+                    Okno czasowe od
+                    <input
+                      type="time"
+                      value={addForm.windowStart}
+                      onChange={(event) =>
+                        setAddForm((current) => ({
+                          ...current,
+                          windowStart: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                  <label>
+                    Okno czasowe do
+                    <input
+                      type="time"
+                      value={addForm.windowEnd}
+                      onChange={(event) =>
+                        setAddForm((current) => ({
+                          ...current,
+                          windowEnd: event.target.value,
+                        }))
+                      }
+                    />
+                  </label>
+                </div>
                 {addError && <p className={styles.error}>{addError}</p>}
                 <button
                   type="button"
@@ -878,6 +982,12 @@ export default function DeliveryPlanner({
                         <MapPin size={13} />
                         {delivery.address}
                       </small>
+                      {formatWindow(delivery.windowStart, delivery.windowEnd) && (
+                        <small>
+                          <Clock3 size={13} />
+                          {formatWindow(delivery.windowStart, delivery.windowEnd)}
+                        </small>
+                      )}
                     </span>
                     <span className={styles.duration}>
                       <Clock3 size={13} />
@@ -1028,7 +1138,11 @@ export default function DeliveryPlanner({
                     <strong>{delivery.customer}</strong>
                     <b>{delivery.vehicle}</b>
                     <small>
-                      {delivery.address} ·{" "}
+                      {delivery.address}
+                      {formatWindow(delivery.windowStart, delivery.windowEnd)
+                        ? ` · ${formatWindow(delivery.windowStart, delivery.windowEnd)}`
+                        : ""}{" "}
+                      ·{" "}
                       {completed
                         ? "wydano"
                         : failed

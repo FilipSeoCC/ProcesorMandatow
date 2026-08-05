@@ -722,6 +722,26 @@
   color: #b42336;
 }
 
+.assigneePicker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #5c6a7f;
+}
+.assigneePicker select {
+  flex: 1;
+  border: 1px solid #dce3ec;
+  border-radius: 9px;
+  padding: 8px 10px;
+  min-height: 36px;
+  font-size: 13px;
+  color: #1c2534;
+  background: #fff;
+  font-family: inherit;
+}
 .historyLink {
   display: inline-flex;
   align-items: center;
