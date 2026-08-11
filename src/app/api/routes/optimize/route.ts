@@ -64,14 +64,19 @@ export async function POST(request: Request) {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "Nieprawidłowy JSON." }, { status: 400 }); }
   if (!valid(body)) return NextResponse.json({ error: "Podaj od 2 do 20 poprawnych punktów dostawy." }, { status: 422 });
 
+  // Auth must be checked before any demo-mode fallback below — otherwise an
+  // unconfigured/misconfigured deployment (missing Google WIF env vars) would
+  // serve optimized routes to unauthenticated callers whenever
+  // ROUTE_OPTIMIZATION_DEMO_MODE is on.
+  const member = await verifyMember(request, ["admin", "boss", "user"]);
+  if (!member) return NextResponse.json({ error: "Zaloguj się, aby ułożyć trasę." }, { status: 401 });
+
   const audience = process.env.GOOGLE_WIF_AUDIENCE;
   const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
   if (!audience || !projectId) {
     if (process.env.ROUTE_OPTIMIZATION_DEMO_MODE === "true") return NextResponse.json(demo(body));
     return NextResponse.json({ error: "Planowanie tras nie jest skonfigurowane." }, { status: 503 });
   }
-  const member = await verifyMember(request, ["admin", "boss", "user"]);
-  if (!member) return NextResponse.json({ error: "Zaloguj się, aby użyć Google." }, { status: 401 });
 
   const now = new Date();
   const depotLocation = { latitude: body.depot.latitude, longitude: body.depot.longitude };
