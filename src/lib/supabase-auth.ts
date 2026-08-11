@@ -1,4 +1,5 @@
 import "server-only";
+import { jwtAssuranceLevel } from "@/lib/auth-session";
 import { getSupabaseServerEnv } from "@/lib/supabase-env";
 
 // Simplified to 3 roles (Filip's call): admin = full access incl. team/role
@@ -14,6 +15,10 @@ export type VerifiedMember = {
   email: string | null;
   firstName: string | null;
   lastName: string | null;
+  phone: string | null;
+  onboardingVersion: number | null;
+  onboardingStep: number;
+  onboardingCompletedAt: string | null;
   organizationId: string;
   role: AppRole;
   accessToken: string;
@@ -56,7 +61,15 @@ export async function verifyMember(
   const user = (await userResponse.json()) as {
     id?: string;
     email?: string;
-    user_metadata?: { first_name?: string; last_name?: string };
+    user_metadata?: {
+      first_name?: string;
+      last_name?: string;
+      phone?: string;
+      onboarding_version?: number | string;
+      onboarding_step?: number | string;
+      onboarding_completed_at?: string;
+    };
+    factors?: Array<{ factor_type?: string; status?: string }>;
   };
   if (!user.id) return null;
 
@@ -75,11 +88,28 @@ export async function verifyMember(
   }>;
   const membership = memberships[0];
   if (!membership || !allowed.includes(membership.role)) return null;
+  const verifiedFactor = user.factors?.some(
+    (factor) => factor.factor_type === "totp" && factor.status === "verified",
+  );
+  const requiresAal2 =
+    membership.role === "admin" || membership.role === "boss" || verifiedFactor;
+  if (requiresAal2 && jwtAssuranceLevel(accessToken) !== "aal2") return null;
+  const onboardingVersion =
+    user.user_metadata?.onboarding_version == null
+      ? Number.NaN
+      : Number(user.user_metadata.onboarding_version);
+  const onboardingStep = Number(user.user_metadata?.onboarding_step);
   return {
     userId: user.id,
     email: user.email ?? null,
     firstName: user.user_metadata?.first_name ?? null,
     lastName: user.user_metadata?.last_name ?? null,
+    phone: user.user_metadata?.phone ?? null,
+    onboardingVersion: Number.isFinite(onboardingVersion) ? onboardingVersion : null,
+    onboardingStep: Number.isInteger(onboardingStep)
+      ? Math.min(3, Math.max(0, onboardingStep))
+      : 0,
+    onboardingCompletedAt: user.user_metadata?.onboarding_completed_at ?? null,
     organizationId: membership.organization_id,
     role: membership.role,
     accessToken,

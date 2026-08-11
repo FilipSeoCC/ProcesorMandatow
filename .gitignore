@@ -44,3 +44,7 @@ next-env.d.ts
 
 # claude code local dev config
 .claude/
+
+# graphify local output and machine-specific hook command
+/graphify-out/
+/.codex/hooks.json

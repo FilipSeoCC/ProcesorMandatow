@@ -122,6 +122,25 @@ zatwierdzać) zawsze ląduje jako `admin`/`active`.
 Zabezpieczenie: nie da się odebrać roli admina samemu sobie, jeśli jest się
 jedynym adminem w organizacji.
 
+**Utwardzenie logowania (2026-08-11, branch `codex/user-onboarding`)**:
+
+- sesje aplikacji są przenoszone wyłącznie w ciasteczkach HttpOnly; frontend
+  nie odczytuje już tokenów Supabase z `localStorage`,
+- logowanie, reset hasła, zmiana hasła i MFA mają licznik prób w bazie
+  (`20260811000000_auth_security.sql`),
+- nowe hasła mają 12–128 znaków, blokadę prostych haseł i kontrolę przez
+  Have I Been Pwned w trybie k-anonimowym,
+- zmiana hasła w ustawieniach wymaga podania obecnego hasła,
+- `admin` i `boss` muszą skonfigurować TOTP i logować się na poziomie AAL2;
+  zwykły `user` pozostaje przy haśle, dopóki sam nie ma aktywnego MFA,
+- model rejestracji nie zmienił się: rejestracja jest publiczna, a konto
+  wymaga potwierdzenia adresu e-mail i pozostaje `pending` do akceptacji przez
+  `boss` lub `admin`.
+
+Po wdrożeniu kodu migracja bezpieczeństwa musi zostać zastosowana do
+produkcyjnego Supabase. Jeśli `SUPABASE_DB_URL` nie jest ustawione w Vercel,
+pipeline builda jej nie uruchomi.
+
 ### 2. Zero testów
 
 Brak skryptu `test` i jakiegokolwiek pliku testowego. Najbardziej opłacalne do

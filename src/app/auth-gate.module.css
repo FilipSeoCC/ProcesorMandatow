@@ -213,6 +213,35 @@
   color: #718096;
   font-size: 11px;
 }
+.mfaSetup {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #dce4ee;
+  border-radius: 12px;
+  background: #f8fafc;
+  text-align: center;
+}
+.mfaSetup img {
+  width: 190px;
+  height: 190px;
+  max-width: 100%;
+}
+.mfaSetup p {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.mfaSetup code {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: #eaf2ff;
+  color: #1d4ed8;
+  font-size: 11px;
+}
 .bugModalLayer {
   position: fixed;
   inset: 0;

@@ -120,23 +120,9 @@ function formatWindow(windowStart: string | null, windowEnd: string | null) {
   return time(windowStart || windowEnd!);
 }
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-
 function authHeaders() {
-  const token = storedAccessToken();
   return {
     "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 

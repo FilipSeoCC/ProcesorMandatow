@@ -7,23 +7,9 @@ import styles from "./fleet-manager.module.css";
 type Branch = { id: string; name: string; address: string; phone: string; hours: string };
 type BranchVehicle = { id: string; label: string; branchId: string | null };
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-
 function authHeaders() {
-  const token = storedAccessToken();
   return {
     "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
 }
 

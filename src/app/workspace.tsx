@@ -26,6 +26,7 @@ import {
   Search,
   Send,
   ShieldCheck,
+  Sparkles,
   Trash2,
   Upload,
   UserRound,
@@ -186,18 +187,6 @@ function formatCaseEventAt(value: string) {
   return iso[4] && iso[5] ? `${date}, ${iso[4]}:${iso[5]}` : date;
 }
 
-function storedAccessToken() {
-  for (let index = 0; index < localStorage.length; index++) {
-    const key = localStorage.key(index);
-    if (!key?.startsWith("sb-") || !key.endsWith("-auth-token")) continue;
-    try {
-      const session = JSON.parse(localStorage.getItem(key) || "null");
-      if (session?.access_token) return String(session.access_token);
-    } catch {}
-  }
-  return null;
-}
-
 const demoCases: CaseItem[] = [
   {
     id: "SM/8421/26",
@@ -324,6 +313,7 @@ export default function MandatyWorkspace() {
     lastName: string | null;
   } | null>(null);
   const [newPassword, setNewPassword] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
   const [passwordStatus, setPasswordStatus] = useState<
     "idle" | "saving" | "saved" | "error"
   >("idle");
@@ -725,12 +715,20 @@ export default function MandatyWorkspace() {
       })
       .catch(() => null);
     loadTeam().catch(() => null);
+    // Initial bootstrap is intentionally mount-only; subsequent document refreshes
+    // are driven by the OCR polling effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function changePassword() {
-    if (newPassword.length < 8) {
+    if (!currentPassword) {
       setPasswordStatus("error");
-      setPasswordError("Nowe hasło musi mieć minimum 8 znaków.");
+      setPasswordError("Podaj obecne hasło.");
+      return;
+    }
+    if (newPassword.length < 12) {
+      setPasswordStatus("error");
+      setPasswordError("Nowe hasło musi mieć minimum 12 znaków.");
       return;
     }
     setPasswordStatus("saving");
@@ -739,12 +737,13 @@ export default function MandatyWorkspace() {
       const response = await fetch("/api/auth", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newPassword }),
+        body: JSON.stringify({ currentPassword, newPassword }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok)
         throw new Error(data.error || "Nie udało się zmienić hasła.");
       setPasswordStatus("saved");
+      setCurrentPassword("");
       setNewPassword("");
     } catch (reason) {
       setPasswordStatus("error");
@@ -795,6 +794,9 @@ export default function MandatyWorkspace() {
       loadDocuments(true).catch(() => null);
     }, 4000);
     return () => window.clearInterval(interval);
+    // caseItems changes after every poll, so the next interval always captures
+    // the current loadDocuments closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [caseItems]);
 
   async function retryOcr() {
@@ -1227,14 +1229,12 @@ export default function MandatyWorkspace() {
     setBugReportStatus("sending");
     setBugReportError(null);
     try {
-      const token = storedAccessToken();
       const form = new FormData();
       form.set("description", description);
       form.set("context", document.title);
       if (bugReportAttachment) form.set("attachment", bugReportAttachment);
       const response = await fetch("/api/bug-reports", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       });
       const data = await response.json().catch(() => ({}));
@@ -1270,10 +1270,8 @@ export default function MandatyWorkspace() {
         );
       const form = new FormData();
       preparedFiles.forEach((file) => form.append("files", file.blob, file.name));
-      const token = storedAccessToken();
       const response = await fetch("/api/documents/upload", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: form,
       });
       const result = await response.json();
@@ -1462,6 +1460,17 @@ export default function MandatyWorkspace() {
                 >
                   <UserRound size={16} />
                   Ustawienia
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAccountMenuOpen(false);
+                    window.dispatchEvent(new Event("flotaflow:open-onboarding"));
+                  }}
+                >
+                  <Sparkles size={16} />
+                  Uruchom onboarding
                 </button>
                 <button
                   type="button"
@@ -2610,16 +2619,31 @@ export default function MandatyWorkspace() {
             </div>
             <div className={styles.settingsPasswordForm}>
               <label>
+                Obecne hasło
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={currentPassword}
+                  onChange={(event) => {
+                    setCurrentPassword(event.target.value);
+                    setPasswordStatus("idle");
+                  }}
+                  placeholder="Potwierdź swoją tożsamość"
+                />
+              </label>
+              <label>
                 Nowe hasło
                 <input
                   type="password"
-                  minLength={8}
+                  minLength={12}
+                  maxLength={128}
+                  autoComplete="new-password"
                   value={newPassword}
                   onChange={(event) => {
                     setNewPassword(event.target.value);
                     setPasswordStatus("idle");
                   }}
-                  placeholder="Minimum 8 znaków"
+                  placeholder="Minimum 12 znaków"
                 />
               </label>
               {passwordStatus === "error" && passwordError && (

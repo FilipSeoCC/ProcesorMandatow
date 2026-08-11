@@ -331,9 +331,8 @@ export default function Employees({
             <div>
               <h2>Konta i uprawnienia</h2>
               <p>
-                Nowe konta rejestrują się samodzielnie z rolą &bdquo;user&rdquo;
-                (bez zatwierdzania spraw). Nadaj &bdquo;boss&rdquo; albo
-                &bdquo;admin&rdquo; poniżej.
+                Nowe konta rejestrują się samodzielnie i czekają na akceptację.
+                Nadaj rolę poniżej — zapis roli jednocześnie aktywuje konto.
               </p>
             </div>
           </div>

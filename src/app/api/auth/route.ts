@@ -1,39 +1,42 @@
 import { NextResponse } from "next/server";
-import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
-import { verifyMember } from "@/lib/supabase-auth";
 import { writeAuditEvent } from "@/lib/audit";
-import { buildRegistrationReceivedEmail } from "@/lib/account-emails";
+import {
+  clearAuthRateLimits,
+  consumeAuthRateLimits,
+  rateLimitedResponse,
+} from "@/lib/auth-rate-limit";
+import {
+  clearPendingMfaCookies,
+  clearSessionCookies,
+  jwtAssuranceLevel,
+  setPendingMfaCookies,
+  setSessionCookies,
+  type AuthTokens,
+} from "@/lib/auth-session";
+import { validateNewPassword } from "@/lib/password-security";
+import { verifyMember } from "@/lib/supabase-auth";
+import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
-type AuthSession = {
-  access_token: string;
-  refresh_token: string;
-  expires_in?: number;
-  user?: { id?: string; email?: string };
+export const runtime = "nodejs";
+
+type Factor = { id?: string; factor_type?: string; status?: string };
+type AuthSession = AuthTokens & {
+  user?: {
+    id?: string;
+    email?: string;
+    factors?: Factor[];
+    user_metadata?: {
+      first_name?: string;
+      last_name?: string;
+      phone?: string;
+      onboarding_version?: number | string;
+      onboarding_step?: number | string;
+      onboarding_completed_at?: string;
+    };
+  };
 };
 const allRoles = ["admin", "boss", "user"] as const;
 
-function setSession(response: NextResponse, session: AuthSession) {
-  const common = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-  };
-  response.cookies.set("ff-access", session.access_token, {
-    ...common,
-    maxAge: Math.max(60, session.expires_in ?? 3600),
-  });
-  response.cookies.set("ff-refresh", session.refresh_token, {
-    ...common,
-    maxAge: 60 * 60 * 24 * 30,
-  });
-}
-
-// RLS hides a pending member's own row from a user-token query
-// (is_org_member/has_org_role both require status='active'), so it can't
-// distinguish "pending" from "no membership at all". The login gate needs
-// that distinction with certainty, so it looks the row up with the admin
-// key instead, bypassing RLS.
 async function membershipByUserId(userId: string) {
   const { url, secretKey } = getSupabaseServerEnv();
   if (!url || !secretKey) return null;
@@ -46,33 +49,16 @@ async function membershipByUserId(userId: string) {
     (
       (await response.json()) as Array<{
         organization_id: string;
-        role: string;
+        role: "admin" | "boss" | "user";
         status: string;
       }>
     )[0] ?? null
   );
 }
 
-async function sendRegistrationReceivedEmail(email: string, name: string) {
-  const resendKey = process.env.RESEND_API_KEY?.trim();
-  const from = process.env.RESEND_FROM_EMAIL?.trim();
-  if (!resendKey || !from) return;
-  const mail = buildRegistrationReceivedEmail(name);
-  try {
-    await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${resendKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [email], subject: mail.subject, html: mail.html, text: mail.text }),
-      signal: AbortSignal.timeout(15_000),
-    });
-  } catch (reason) {
-    console.error("Resend registration-received email failed", reason);
-  }
-}
-
 async function bootstrap(accessToken: string) {
   const { url, publishableKey } = getSupabaseServerEnv();
-  if (!url || !publishableKey) return { ok: false, schemaMissing: false };
+  if (!url || !publishableKey) return false;
   const response = await fetch(`${url}/rest/v1/rpc/bootstrap_organization`, {
     method: "POST",
     headers: {
@@ -83,16 +69,57 @@ async function bootstrap(accessToken: string) {
     body: JSON.stringify({ company_name: "FlotaFlow" }),
     cache: "no-store",
   });
+  return response.ok;
+}
+
+function onboardingPayload(input: {
+  role: string;
+  email?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  phone?: string | null;
+  version?: number | string | null;
+  step?: number | string | null;
+  completedAt?: string | null;
+}) {
+  const version = input.version == null ? Number.NaN : Number(input.version);
+  const rawStep = Number(input.step);
+  const step = Number.isInteger(rawStep) ? Math.min(3, Math.max(0, rawStep)) : 0;
+  const required = version === 0;
   return {
-    ok: response.ok,
-    schemaMissing: response.status === 404 || response.status === 400,
+    required,
+    completed: !required,
+    step,
+    role: input.role,
+    email: input.email ?? null,
+    firstName: input.firstName ?? "",
+    lastName: input.lastName ?? "",
+    phone: input.phone ?? "",
+    completedAt: input.completedAt ?? null,
+  };
+}
+
+function authError(data: Record<string, unknown>, fallback: string) {
+  return String(data.msg || data.message || data.error_description || fallback);
+}
+
+async function passwordLogin(url: string, key: string, email: string, password: string) {
+  const response = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: key, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+    cache: "no-store",
+  });
+  return {
+    response,
+    data: (await response.json().catch(() => ({}))) as Partial<AuthSession> &
+      Record<string, unknown>,
   };
 }
 
 export async function GET(request: Request) {
   const member = await verifyMember(request, [...allRoles]);
-  if (!member)
-    return NextResponse.json({ authenticated: false }, { status: 401 });
+  if (!member) return NextResponse.json({ authenticated: false }, { status: 401 });
   return NextResponse.json({
     authenticated: true,
     role: member.role,
@@ -100,15 +127,26 @@ export async function GET(request: Request) {
     email: member.email,
     firstName: member.firstName,
     lastName: member.lastName,
+    phone: member.phone,
     userId: member.userId,
+    onboarding: onboardingPayload({
+      role: member.role,
+      email: member.email,
+      firstName: member.firstName,
+      lastName: member.lastName,
+      phone: member.phone,
+      version: member.onboardingVersion,
+      step: member.onboardingStep,
+      completedAt: member.onboardingCompletedAt,
+    }),
   });
 }
 
 export async function PATCH(request: Request) {
   const member = await verifyMember(request, [...allRoles]);
-  if (!member)
-    return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
+  if (!member) return NextResponse.json({ error: "Brak dostępu." }, { status: 401 });
   const body = (await request.json().catch(() => null)) as {
+    currentPassword?: string;
     newPassword?: string;
     firstName?: string;
     lastName?: string;
@@ -121,47 +159,54 @@ export async function PATCH(request: Request) {
   const lastName = body?.lastName?.trim() ?? "";
   if (!updatingPassword && !updatingName)
     return NextResponse.json({ error: "Brak danych do zapisania." }, { status: 422 });
-  if (updatingPassword && newPassword.length < 12)
-    return NextResponse.json(
-      { error: "Nowe hasło musi mieć minimum 12 znaków." },
-      { status: 422 },
-    );
   if (updatingName && (!firstName || !lastName))
-    return NextResponse.json(
-      { error: "Podaj imię i nazwisko." },
-      { status: 422 },
-    );
+    return NextResponse.json({ error: "Podaj imię i nazwisko." }, { status: 422 });
+
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey)
-    return NextResponse.json(
-      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
-      { status: 503 },
+    return NextResponse.json({ error: "Usługa jest tymczasowo niedostępna." }, { status: 503 });
+
+  let updateAccessToken = member.accessToken;
+  if (updatingPassword) {
+    const passwordError = await validateNewPassword(newPassword);
+    if (passwordError)
+      return NextResponse.json({ error: passwordError }, { status: 422 });
+    if (!body?.currentPassword || !member.email)
+      return NextResponse.json({ error: "Podaj obecne hasło." }, { status: 422 });
+    const limiter = await consumeAuthRateLimits(request, [
+      { scope: "password-change", subject: member.userId, limit: 6, windowSeconds: 15 * 60 },
+    ]);
+    if (!limiter.allowed) return rateLimitedResponse(limiter);
+    const verification = await passwordLogin(
+      url,
+      publishableKey,
+      member.email,
+      body.currentPassword,
     );
+    if (!verification.response.ok || verification.data.user?.id !== member.userId)
+      return NextResponse.json({ error: "Obecne hasło jest nieprawidłowe." }, { status: 401 });
+    if (!verification.data.access_token)
+      return NextResponse.json({ error: "Nie udało się odświeżyć bezpiecznej sesji." }, { status: 401 });
+    updateAccessToken = verification.data.access_token;
+  }
+
   const response = await fetch(`${url}/auth/v1/user`, {
     method: "PUT",
     headers: {
       apikey: publishableKey,
-      Authorization: `Bearer ${member.accessToken}`,
+      Authorization: `Bearer ${updateAccessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
       ...(updatingPassword ? { password: newPassword } : {}),
-      // Supabase merges this into the existing user_metadata rather than
-      // replacing it, so unrelated fields set at signup (phone,
-      // privacy_consent_at) survive an edit that only touches the name.
       ...(updatingName ? { data: { first_name: firstName, last_name: lastName } } : {}),
     }),
     cache: "no-store",
   });
   if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
+    const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     return NextResponse.json(
-      {
-        error:
-          data.msg ||
-          data.error_description ||
-          (updatingPassword ? "Nie udało się zmienić hasła." : "Nie udało się zapisać danych."),
-      },
+      { error: authError(data, "Nie udało się zapisać danych konta.") },
       { status: 400 },
     );
   }
@@ -188,144 +233,142 @@ export async function POST(request: Request) {
   const email = body?.email?.trim().toLowerCase() ?? "";
   const password = body?.password ?? "";
   const signingUp = body?.action === "sign-up";
-  const minimumPasswordLength = signingUp ? 12 : 8;
   if (!/^\S+@\S+\.\S+$/.test(email))
-    return NextResponse.json(
-      { error: "Podaj poprawny adres e-mail." },
-      { status: 422 },
-    );
-  if (password.length < minimumPasswordLength)
-    return NextResponse.json(
-      { error: `Hasło musi mieć minimum ${minimumPasswordLength} znaków.` },
-      { status: 422 },
-    );
+    return NextResponse.json({ error: "Podaj poprawny adres e-mail." }, { status: 422 });
+  if (!signingUp && password.length < 1)
+    return NextResponse.json({ error: "Podaj hasło." }, { status: 422 });
+
+  const limiter = await consumeAuthRateLimits(request, [
+    {
+      scope: signingUp ? "self-signup" : "login",
+      subject: email,
+      limit: signingUp ? 5 : 10,
+      windowSeconds: signingUp ? 60 * 60 : 15 * 60,
+    },
+  ]);
+  if (!limiter.allowed) return rateLimitedResponse(limiter);
+
   const { url, publishableKey } = getSupabaseServerEnv();
   if (!url || !publishableKey)
-    return NextResponse.json(
-      { error: "Usługa jest tymczasowo niedostępna. Skontaktuj się z administratorem." },
-      { status: 503 },
-    );
+    return NextResponse.json({ error: "Usługa jest tymczasowo niedostępna." }, { status: 503 });
 
   const firstName = body?.firstName?.trim() ?? "";
   const lastName = body?.lastName?.trim() ?? "";
   const phone = body?.phone?.trim() ?? "";
   if (signingUp) {
+    const passwordError = await validateNewPassword(password);
+    if (passwordError)
+      return NextResponse.json({ error: passwordError }, { status: 422 });
     if (!firstName || !lastName || !phone)
-      return NextResponse.json(
-        { error: "Podaj imię, nazwisko i numer telefonu." },
-        { status: 422 },
-      );
+      return NextResponse.json({ error: "Podaj imię, nazwisko i numer telefonu." }, { status: 422 });
     if (!body?.consent)
-      return NextResponse.json(
-        { error: "Musisz zaakceptować politykę prywatności." },
-        { status: 422 },
-      );
-  }
-  const authUrl = signingUp
-    ? `${url}/auth/v1/signup`
-    : `${url}/auth/v1/token?grant_type=password`;
-  const authResponse = await fetch(authUrl, {
-    method: "POST",
-    headers: { apikey: publishableKey, "Content-Type": "application/json" },
-    body: JSON.stringify(
-      signingUp
-        ? {
-            email,
-            password,
-            data: {
-              first_name: firstName,
-              last_name: lastName,
-              phone,
-              privacy_consent_at: new Date().toISOString(),
-            },
-          }
-        : { email, password },
-    ),
-    cache: "no-store",
-  });
-  const authData = (await authResponse
-    .json()
-    .catch(() => ({}))) as Partial<AuthSession> & {
-    msg?: string;
-    message?: string;
-    error_description?: string;
-  };
-  if (!authResponse.ok)
-    return NextResponse.json(
-      {
-        error:
-          authData.msg ||
-          authData.message ||
-          authData.error_description ||
-          "Nie udało się zalogować.",
+      return NextResponse.json({ error: "Musisz zaakceptować politykę prywatności." }, { status: 422 });
+    const signupResponse = await fetch(`${url}/auth/v1/signup`, {
+      method: "POST",
+      headers: {
+        apikey: publishableKey,
+        "Content-Type": "application/json",
       },
-      { status: authResponse.status === 429 ? 429 : 401 },
-    );
-  if (!authData.access_token || !authData.refresh_token)
-    // This is the branch that actually fires today (Supabase's "Confirm
-    // email" is on) — it's the one real users see right after registering.
-    // The wording covers both steps in one go (confirm the address, then
-    // wait for approval) since the "Zatwierdzono dostęp" notice that would
-    // normally explain the second step is a Resend email and RESEND_API_KEY
-    // is deliberately unconfigured (see docs/stan-projektu.md — parked
-    // 2026-08-02). Don't shorten this back to just "confirm your email"
-    // without restoring that email first.
-    return NextResponse.json(
-      {
-        confirmationRequired: true,
-        message:
-          "Dziękujemy za rejestrację w FlotaFlow! Sprawdź skrzynkę e-mail i potwierdź adres, klikając w link w wiadomości. Po potwierdzeniu poczekaj na zatwierdzenie przez administratora — dostęp uzyskasz, gdy Admin z zespołu przyzna Ci rolę w systemie :)",
-      },
-      { status: 202 },
-    );
-
-  const userId = authData.user?.id;
-  let member = userId ? await membershipByUserId(userId) : null;
-  if (!member) {
-    const created = await bootstrap(authData.access_token);
-    if (!created.ok)
-      return NextResponse.json(
-        {
-          error: created.schemaMissing
-            ? "Brakuje schematu aplikacji w Supabase — migracje (supabase/migrations) nie zostały zastosowane na tej bazie."
-            : "Nie udało się utworzyć organizacji.",
+      body: JSON.stringify({
+        email,
+        password,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          phone,
+          privacy_consent_at: new Date().toISOString(),
+          onboarding_version: 0,
+          onboarding_step: 0,
         },
-        { status: 503 },
+      }),
+      cache: "no-store",
+    });
+    const signupData = (await signupResponse.json().catch(() => ({}))) as
+      Partial<AuthSession> & Record<string, unknown>;
+    if (!signupResponse.ok)
+      return NextResponse.json(
+        { error: authError(signupData, "Nie udało się utworzyć konta.") },
+        { status: signupResponse.status === 429 ? 429 : 400 },
       );
-    member = userId ? await membershipByUserId(userId) : null;
-  }
-  if (member?.status === "pending") {
-    if (signingUp) {
-      await sendRegistrationReceivedEmail(email, `${firstName} ${lastName}`.trim());
+    if (!signupData.access_token || !signupData.refresh_token)
       return NextResponse.json(
         {
-          pendingApproval: true,
-          // Doesn't promise an email channel specifically: sendRegistrationReceivedEmail
-          // above is a no-op without RESEND_API_KEY (parked 2026-08-02, see
-          // docs/stan-projektu.md), and this branch fires only when Supabase's own
-          // "Confirm email" is off — the wording has to stay true either way.
+          confirmationRequired: true,
           message:
-            "Dziękujemy za rejestrację! Twoje konto czeka na zatwierdzenie przez administratora.",
+            "Konto zostało utworzone. Potwierdź adres e-mail, a następnie poczekaj na akceptację i nadanie roli przez bossa lub administratora.",
         },
         { status: 202 },
       );
-    }
+  }
+
+  const login = await passwordLogin(url, publishableKey, email, password);
+  const authData = login.data;
+  if (!login.response.ok || !authData.access_token || !authData.refresh_token)
     return NextResponse.json(
-      { error: "Twoje konto czeka na zatwierdzenie roli przez administratora." },
+      { error: authError(authData, "Nieprawidłowy e-mail lub hasło.") },
+      { status: login.response.status === 429 ? 429 : 401 },
+    );
+  await clearAuthRateLimits(request, signingUp ? "self-signup" : "login", email);
+  const userId = authData.user?.id;
+  let member = userId ? await membershipByUserId(userId) : null;
+  if (!member && userId) {
+    const bootstrapped = await bootstrap(authData.access_token);
+    if (!bootstrapped)
+      return NextResponse.json(
+        { error: "Nie udało się zgłosić konta do akceptacji." },
+        { status: 503 },
+      );
+    member = await membershipByUserId(userId);
+  }
+  if (!member || member.status !== "active")
+    return NextResponse.json(
+      {
+        pendingApproval: true,
+        message: "Konto czeka na akceptację i nadanie roli przez bossa lub administratora.",
+      },
       { status: 403 },
     );
+
+  const verifiedFactor = authData.user?.factors?.some(
+    (factor) => factor.factor_type === "totp" && factor.status === "verified",
+  );
+  const privileged = member.role === "admin" || member.role === "boss";
+  if ((privileged || verifiedFactor) && jwtAssuranceLevel(authData.access_token) !== "aal2") {
+    const response = NextResponse.json({
+      mfaRequired: true,
+      enrollmentRequired: privileged && !verifiedFactor,
+      email: authData.user?.email ?? email,
+    });
+    setPendingMfaCookies(response, authData as AuthSession);
+    return response;
   }
+
+  const metadata = authData.user?.user_metadata;
   const response = NextResponse.json({
     authenticated: true,
-    role: member?.role ?? "admin",
+    role: member.role,
+    email: authData.user?.email ?? email,
+    firstName: metadata?.first_name ?? "",
+    lastName: metadata?.last_name ?? "",
+    phone: metadata?.phone ?? "",
+    onboarding: onboardingPayload({
+      role: member.role,
+      email: authData.user?.email ?? email,
+      firstName: metadata?.first_name,
+      lastName: metadata?.last_name,
+      phone: metadata?.phone,
+      version: metadata?.onboarding_version,
+      step: metadata?.onboarding_step,
+      completedAt: metadata?.onboarding_completed_at,
+    }),
   });
-  setSession(response, authData as AuthSession);
+  setSessionCookies(response, authData as AuthSession);
   return response;
 }
 
 export async function DELETE() {
   const response = NextResponse.json({ authenticated: false });
-  response.cookies.set("ff-access", "", { path: "/", maxAge: 0 });
-  response.cookies.set("ff-refresh", "", { path: "/", maxAge: 0 });
+  clearSessionCookies(response);
+  clearPendingMfaCookies(response);
   return response;
 }
