@@ -800,14 +800,39 @@ export default function MandatyWorkspace() {
   }, [caseItems]);
 
   async function retryOcr() {
-    if (!selected.documentId || retrying) return;
+    if (
+      !selected.documentId ||
+      retrying ||
+      selected.confirmedAt ||
+      selected.resolvedAt
+    )
+      return;
     setRetrying(true);
     try {
       const response = await fetch(
         `/api/documents/${selected.documentId}/retry`,
         { method: "POST" },
       );
-      if (response.ok) await loadDocuments(true);
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+      if (!response.ok)
+        throw new Error(result.error || "Nie udało się ponowić analizy OCR.");
+      await loadDocuments(true);
+      setToast({
+        id: Date.now(),
+        success: true,
+        message: "Ponowne rozpoznawanie dokumentu zostało uruchomione.",
+      });
+    } catch (reason) {
+      setToast({
+        id: Date.now(),
+        success: false,
+        message:
+          reason instanceof Error
+            ? reason.message
+            : "Nie udało się ponowić analizy OCR.",
+      });
     } finally {
       setRetrying(false);
     }
@@ -1997,7 +2022,10 @@ export default function MandatyWorkspace() {
                                   ? "Nie rozpoznaliśmy żadnych danych na zdjęciu — zrób nowe zdjęcie w dobrym oświetleniu, obejmując całą stronę, usuń tę sprawę i dodaj dokument ponownie"
                                   : "Nie udało się odczytać dokumentu"}
                       </small>
-                      {selected.documentId && selected.ocrStatus !== "retake_required" && (
+                      {selected.documentId &&
+                        !selected.confirmedAt &&
+                        !selected.resolvedAt &&
+                        selected.ocrStatus !== "retake_required" && (
                         <button
                           type="button"
                           className={styles.textButtonFramed}

@@ -432,3 +432,10 @@ Separately (different repo, mentioned here only because it came up in the same s
 - Retained and included the existing role-aware onboarding changes on this branch. Updated the account screen copy so role assignment is clearly the approval action.
 - Added `supabase/migrations/20260811000000_auth_security.sql`; production must run it. Without `SUPABASE_DB_URL`, `npm run build` prints a migration skip warning.
 - Verification: eslint clean; `npx tsc --noEmit` clean; authority-detection smoke test 5/5; `npx next build` completed successfully (run without `npm run build` so the verification could not mutate the remote database through the migration script).
+
+## 2026-08-11 — Codex — Selektywne wdrożenie brakujących poprawek Michała
+- Nie scalano w całości starych PR-ów #2/#3, ponieważ bazują na kodzie sprzed obecnego MFA, modelu ról i poprawek historii floty. Przeniesiono tylko elementy, których nadal brakowało.
+- `PUT /api/auth` bezpiecznie rotuje sesję z `ff-refresh`, ponownie sprawdza użytkownika, aktywne członkostwo i AAL2, a `auth-gate.tsx` odświeża ją co 10 minut oraz po powrocie do karty. Przejściowy błąd sieci nie wylogowuje użytkownika; 401/403 tak.
+- `POST /api/documents/[id]/retry` blokuje ponowne OCR zatwierdzonych i zrealizowanych spraw również po bezpośrednim wywołaniu API. Wszystkie zapisy wyniku OCR mają dodatkowo atomowy filtr `confirmed_at IS NULL AND resolved_at IS NULL`, więc nawet zatwierdzenie sprawy w trakcie analizy nie pozwoli późniejszemu wynikowi nadpisać zaakceptowanych danych. UI ukrywa wtedy przycisk retry i pokazuje wynik/błąd uruchomienia jako toast.
+- Dodano `scripts/map-client-fleet-import.mjs`: łączy eksporty pojazdów, klientów i przypisań, rozpoznaje polskie/angielskie nagłówki, normalizuje rejestracje i daty Europe/Warsaw, zachowuje koniec umowy, e-mail oraz NIP/PESEL. Importer CSV/XML i szablon aplikacji obsługują teraz te opcjonalne kolumny. Lokalne eksporty są ignorowane przez Git.
+- Weryfikacja: `npm run test:fleet-import`, `npm run test:authority`, `npm run lint`, `npx tsc --noEmit` i pełny `npx next build` są czyste. Graphify zaktualizowany do 804 węzłów / 1494 krawędzi / 67 społeczności.

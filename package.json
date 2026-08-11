@@ -8,7 +8,8 @@
     "db:migrate": "node scripts/migrate-db.mjs",
     "start": "next start",
     "lint": "eslint",
-    "test:authority": "node scripts/check-authority-detection.cjs"
+    "test:authority": "node scripts/check-authority-detection.cjs",
+    "test:fleet-import": "node scripts/check-fleet-import-mapper.mjs"
   },
   "dependencies": {
     "@fontsource/noto-sans": "^5.3.0",

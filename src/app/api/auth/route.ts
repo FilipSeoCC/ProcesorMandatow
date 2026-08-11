@@ -8,6 +8,7 @@ import {
 import {
   clearPendingMfaCookies,
   clearSessionCookies,
+  cookieValue,
   jwtAssuranceLevel,
   setPendingMfaCookies,
   setSessionCookies,
@@ -36,24 +37,33 @@ type AuthSession = AuthTokens & {
   };
 };
 const allRoles = ["admin", "boss", "user"] as const;
+type Membership = {
+  organization_id: string;
+  role: "admin" | "boss" | "user";
+  status: string;
+};
 
-async function membershipByUserId(userId: string) {
+async function membershipLookupByUserId(userId: string): Promise<{
+  available: boolean;
+  membership: Membership | null;
+}> {
   const { url, secretKey } = getSupabaseServerEnv();
-  if (!url || !secretKey) return null;
+  if (!url || !secretKey) return { available: false, membership: null };
   const response = await fetch(
     `${url}/rest/v1/organization_members?select=organization_id,role,status&user_id=eq.${encodeURIComponent(userId)}&limit=1`,
-    { headers: adminHeaders(secretKey), cache: "no-store" },
-  );
-  if (!response.ok) return null;
-  return (
-    (
-      (await response.json()) as Array<{
-        organization_id: string;
-        role: "admin" | "boss" | "user";
-        status: string;
-      }>
-    )[0] ?? null
-  );
+    {
+      headers: adminHeaders(secretKey),
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+    },
+  ).catch(() => null);
+  if (!response?.ok) return { available: false, membership: null };
+  const memberships = (await response.json().catch(() => [])) as Membership[];
+  return { available: true, membership: memberships[0] ?? null };
+}
+
+async function membershipByUserId(userId: string) {
+  return (await membershipLookupByUserId(userId)).membership;
 }
 
 async function bootstrap(accessToken: string) {
@@ -140,6 +150,156 @@ export async function GET(request: Request) {
       completedAt: member.onboardingCompletedAt,
     }),
   });
+}
+
+export async function PUT(request: Request) {
+  const refreshToken = cookieValue(request, "ff-refresh");
+  if (!refreshToken)
+    return NextResponse.json({ error: "Sesja wygasła. Zaloguj się ponownie." }, { status: 401 });
+
+  const { url, publishableKey } = getSupabaseServerEnv();
+  if (!url || !publishableKey)
+    return NextResponse.json(
+      { error: "Usługa jest tymczasowo niedostępna." },
+      { status: 503 },
+    );
+
+  const refreshResponse = await fetch(
+    `${url}/auth/v1/token?grant_type=refresh_token`,
+    {
+      method: "POST",
+      headers: { apikey: publishableKey, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(8_000),
+    },
+  ).catch(() => null);
+  if (!refreshResponse) {
+    return NextResponse.json(
+      { error: "Nie udało się odświeżyć sesji." },
+      { status: 502 },
+    );
+  }
+
+  const refreshed = (await refreshResponse.json().catch(() => ({}))) as
+    Partial<AuthSession> & Record<string, unknown>;
+  if (
+    !refreshResponse.ok ||
+    !refreshed.access_token ||
+    !refreshed.refresh_token
+  ) {
+    const invalidSession = refreshResponse.status === 400 || refreshResponse.status === 401;
+    const response = NextResponse.json(
+      {
+        error: authError(
+          refreshed,
+          invalidSession
+            ? "Sesja wygasła. Zaloguj się ponownie."
+            : "Nie udało się odświeżyć sesji.",
+        ),
+      },
+      { status: invalidSession ? 401 : refreshResponse.status === 429 ? 429 : 502 },
+    );
+    if (invalidSession) {
+      clearSessionCookies(response);
+      clearPendingMfaCookies(response);
+    }
+    return response;
+  }
+
+  // Fetch the current user explicitly. Apart from validating the freshly
+  // rotated access token, this keeps MFA factors and onboarding metadata
+  // authoritative even if a token refresh response omits part of `user`.
+  const userResponse = await fetch(`${url}/auth/v1/user`, {
+    headers: {
+      apikey: publishableKey,
+      Authorization: `Bearer ${refreshed.access_token}`,
+    },
+    cache: "no-store",
+    signal: AbortSignal.timeout(8_000),
+  }).catch(() => null);
+  if (!userResponse || userResponse.status === 429 || userResponse.status >= 500)
+    return NextResponse.json(
+      { error: "Nie udało się zweryfikować odświeżonej sesji." },
+      { status: userResponse?.status === 429 ? 429 : 502 },
+    );
+  const user = userResponse.ok
+    ? ((await userResponse.json().catch(() => ({}))) as AuthSession["user"])
+    : null;
+  if (!userResponse.ok || !user?.id) {
+    const response = NextResponse.json(
+      { error: "Sesja wygasła. Zaloguj się ponownie." },
+      { status: 401 },
+    );
+    clearSessionCookies(response);
+    clearPendingMfaCookies(response);
+    return response;
+  }
+
+  const membershipLookup = await membershipLookupByUserId(user.id);
+  if (!membershipLookup.available)
+    return NextResponse.json(
+      { error: "Nie udało się sprawdzić uprawnień odświeżonej sesji." },
+      { status: 502 },
+    );
+  const member = membershipLookup.membership;
+  if (!member || member.status !== "active") {
+    const response = NextResponse.json(
+      {
+        pendingApproval: true,
+        message: "Konto czeka na akceptację i nadanie roli przez bossa lub administratora.",
+      },
+      { status: 403 },
+    );
+    clearSessionCookies(response);
+    clearPendingMfaCookies(response);
+    return response;
+  }
+
+  const session: AuthSession = {
+    access_token: refreshed.access_token,
+    refresh_token: refreshed.refresh_token,
+    expires_in: refreshed.expires_in,
+    user,
+  };
+  const verifiedFactor = user.factors?.some(
+    (factor) => factor.factor_type === "totp" && factor.status === "verified",
+  );
+  const privileged = member.role === "admin" || member.role === "boss";
+  if (
+    (privileged || verifiedFactor) &&
+    jwtAssuranceLevel(session.access_token) !== "aal2"
+  ) {
+    const response = NextResponse.json({
+      mfaRequired: true,
+      enrollmentRequired: privileged && !verifiedFactor,
+      email: user.email ?? null,
+    });
+    setPendingMfaCookies(response, session);
+    return response;
+  }
+
+  const metadata = user.user_metadata;
+  const response = NextResponse.json({
+    authenticated: true,
+    role: member.role,
+    email: user.email ?? null,
+    firstName: metadata?.first_name ?? "",
+    lastName: metadata?.last_name ?? "",
+    phone: metadata?.phone ?? "",
+    onboarding: onboardingPayload({
+      role: member.role,
+      email: user.email,
+      firstName: metadata?.first_name,
+      lastName: metadata?.last_name,
+      phone: metadata?.phone,
+      version: metadata?.onboarding_version,
+      step: metadata?.onboarding_step,
+      completedAt: metadata?.onboarding_completed_at,
+    }),
+  });
+  setSessionCookies(response, session);
+  return response;
 }
 
 export async function PATCH(request: Request) {

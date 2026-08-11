@@ -225,25 +225,27 @@ async function updateDocument(
   values: Record<string, unknown>,
 ) {
   const { url, secretKey } = getSupabaseServerEnv();
-  if (!url || !secretKey) return;
+  if (!url || !secretKey) return false;
   const response = await fetch(
-    `${url}/rest/v1/mandate_documents?id=eq.${encodeURIComponent(documentId)}`,
+    `${url}/rest/v1/mandate_documents?select=id&id=eq.${encodeURIComponent(documentId)}&confirmed_at=is.null&resolved_at=is.null`,
     {
       method: "PATCH",
       headers: {
         ...adminHeaders(secretKey),
         "Content-Type": "application/json",
-        Prefer: "return=minimal",
+        Prefer: "return=representation",
       },
       body: JSON.stringify(values),
       signal: AbortSignal.timeout(10_000),
     },
   );
   if (!response.ok) throw new Error(`OCR_UPDATE_${response.status}`);
+  const updated = (await response.json().catch(() => [])) as Array<{ id: string }>;
+  return updated.length > 0;
 }
 
 export async function markMandateOcrProcessing(documentId: string) {
-  await updateDocument(documentId, {
+  return updateDocument(documentId, {
     status: "processing",
     ocr_error: "",
     ocr_last_attempt_at: new Date().toISOString(),
@@ -263,7 +265,8 @@ export async function processMandateOcr(
     return;
   }
   try {
-    await markMandateOcrProcessing(documentId);
+    const started = await markMandateOcrProcessing(documentId);
+    if (!started) return;
     const pageTexts = await Promise.all(files.map(readWithDocumentAi));
     const rawText = pageTexts.join("\n\n--- PAGE ---\n\n").trim();
 

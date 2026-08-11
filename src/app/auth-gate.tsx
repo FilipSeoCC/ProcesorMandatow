@@ -84,6 +84,69 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (status !== "ready") return;
+    let active = true;
+    let refreshing = false;
+    let lastRefreshAt = Date.now();
+
+    async function refreshSession() {
+      if (refreshing || !active) return;
+      refreshing = true;
+      try {
+        const response = await fetch("/api/auth", {
+          method: "PUT",
+          cache: "no-store",
+        });
+        const result = (await response.json().catch(() => ({}))) as {
+          mfaRequired?: boolean;
+          enrollmentRequired?: boolean;
+          onboarding?: unknown;
+        };
+        if (!active) return;
+        if (result.mfaRequired) {
+          setMfaEnrollmentRequired(Boolean(result.enrollmentRequired));
+          setMfaFactorId("");
+          setMfaQrCode("");
+          setMfaSecret("");
+          setMfaCode("");
+          setStatus("mfa");
+          return;
+        }
+        if (response.status === 401 || response.status === 403) {
+          setOnboardingData(null);
+          setStatus("guest");
+          return;
+        }
+        if (response.ok) {
+          setOnboardingData(readOnboardingData(result.onboarding));
+          lastRefreshAt = Date.now();
+        }
+        // A transient network/upstream error must not throw the user out of
+        // an otherwise valid session. API calls can recover on the next try.
+      } catch {
+        // Keep the current UI and retry on the next interval/visibility event.
+      } finally {
+        refreshing = false;
+      }
+    }
+
+    const interval = window.setInterval(refreshSession, 10 * 60 * 1000);
+    function refreshWhenVisible() {
+      if (
+        document.visibilityState === "visible" &&
+        Date.now() - lastRefreshAt >= 5 * 60 * 1000
+      )
+        void refreshSession();
+    }
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [status]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSubmitting(true);

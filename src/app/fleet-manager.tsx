@@ -13,19 +13,31 @@ export type FleetVehicle = {
   assignedAt: string;
   validTo?: string;
   assignmentId?: string;
-};
-
-type FleetVehicleDetail = FleetVehicle & {
   customerEmail?: string;
   customerTaxId?: string;
 };
 
-const headerAliases: Record<keyof Omit<FleetVehicle, "id" | "validTo" | "assignmentId">, string[]> = {
+type FleetVehicleDetail = FleetVehicle;
+
+type ImportField =
+  | "brand"
+  | "model"
+  | "registration"
+  | "customer"
+  | "assignedAt"
+  | "validTo"
+  | "customerEmail"
+  | "customerTaxId";
+
+const headerAliases: Record<ImportField, string[]> = {
   brand: ["marka", "brand", "manufacturer", "producent"],
   model: ["model", "vehiclemodel", "modelpojazdu"],
   registration: ["nrrej", "nrrejestracyjny", "numerrejestracyjny", "registration", "registrationnumber", "plate"],
   customer: ["klient", "customer", "uzytkownik", "najemca", "firma"],
   assignedAt: ["data", "czas", "dataczas", "dataprzekazania", "assignedat", "od", "start"],
+  validTo: ["datado", "datazakonczenia", "validto", "do", "koniec", "end"],
+  customerEmail: ["emailklienta", "email", "customeremail", "clientemail"],
+  customerTaxId: ["nippesel", "nip", "pesel", "taxid", "customertaxid"],
 };
 
 function normalize(value: string) {
@@ -47,7 +59,7 @@ function splitDelimited(line: string, delimiter: string) {
   return cells;
 }
 
-function findColumn(headers: string[], field: keyof Omit<FleetVehicle, "id" | "validTo" | "assignmentId">) {
+function findColumn(headers: string[], field: ImportField) {
   return headers.findIndex((header) => headerAliases[field].includes(normalize(header)));
 }
 
@@ -59,15 +71,20 @@ function parseCsv(text: string): FleetVehicle[] {
   const indexes = {
     brand: findColumn(headers, "brand"), model: findColumn(headers, "model"), registration: findColumn(headers, "registration"),
     customer: findColumn(headers, "customer"), assignedAt: findColumn(headers, "assignedAt"),
+    validTo: findColumn(headers, "validTo"), customerEmail: findColumn(headers, "customerEmail"), customerTaxId: findColumn(headers, "customerTaxId"),
   };
-  if (Object.values(indexes).some((index) => index < 0)) throw new Error("Brakuje wymaganej kolumny: marka, model, nr_rej, klient lub data_czas.");
+  if ([indexes.brand, indexes.model, indexes.registration, indexes.customer, indexes.assignedAt].some((index) => index < 0)) throw new Error("Brakuje wymaganej kolumny: marka, model, nr_rej, klient lub data_czas.");
   return lines.slice(1).map((line, rowIndex) => {
     const cells = splitDelimited(line, delimiter);
+    const optionalCell = (index: number) => index >= 0 ? cells[index]?.trim() ?? "" : "";
     return {
       id: `import-${Date.now()}-${rowIndex}`,
       brand: cells[indexes.brand]?.trim() ?? "", model: cells[indexes.model]?.trim() ?? "",
       registration: cells[indexes.registration]?.trim().toUpperCase() ?? "", customer: cells[indexes.customer]?.trim() ?? "",
       assignedAt: cells[indexes.assignedAt]?.trim() ?? "",
+      validTo: optionalCell(indexes.validTo),
+      customerEmail: optionalCell(indexes.customerEmail),
+      customerTaxId: optionalCell(indexes.customerTaxId),
     };
   });
 }
@@ -87,6 +104,9 @@ function parseXml(text: string): FleetVehicle[] {
     brand: elementText(row, headerAliases.brand), model: elementText(row, headerAliases.model),
     registration: elementText(row, headerAliases.registration).toUpperCase(), customer: elementText(row, headerAliases.customer),
     assignedAt: elementText(row, headerAliases.assignedAt),
+    validTo: elementText(row, headerAliases.validTo),
+    customerEmail: elementText(row, headerAliases.customerEmail),
+    customerTaxId: elementText(row, headerAliases.customerTaxId),
   }));
 }
 
@@ -187,7 +207,11 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
     if (!timestamps.length) return "—";
     return formatDate(new Date(Math.max(...timestamps)).toISOString());
   }, [vehicles]);
-  const invalidRows = preview.filter((row) => !row.brand || !row.model || !row.registration || !row.customer || !row.assignedAt || Number.isNaN(new Date(row.assignedAt).getTime()));
+  const invalidRows = preview.filter((row) => {
+    const assignedAt = new Date(row.assignedAt);
+    const validTo = row.validTo ? new Date(row.validTo) : null;
+    return !row.brand || !row.model || !row.registration || !row.customer || !row.assignedAt || Number.isNaN(assignedAt.getTime()) || Boolean(validTo && (Number.isNaN(validTo.getTime()) || validTo <= assignedAt));
+  });
 
   async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -222,6 +246,9 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
           registration: row.registration,
           customer: row.customer,
           assignedAt: row.assignedAt,
+          validTo: row.validTo,
+          customerEmail: row.customerEmail,
+          customerTaxId: row.customerTaxId,
         }),
       }).catch(() => null);
       if (!response || !response.ok) failed += 1;
@@ -296,7 +323,7 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
   }
 
   function downloadTemplate() {
-    const content = "marka;model;nr_rej;klient;data_czas\nFord;Transit;WI1234A;Przykładowy Klient Sp. z o.o.;2026-07-26T10:30";
+    const content = "marka;model;nr_rej;klient;data_czas;data_do;email_klienta;nip_pesel\nFord;Transit;WI1234A;Przykładowy Klient Sp. z o.o.;2026-07-26T10:30;2027-07-26T10:30;biuro@klient.pl;5210000000";
     const url = URL.createObjectURL(new Blob([content], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a"); link.href = url; link.download = "szablon-floty.csv"; link.click(); URL.revokeObjectURL(url);
   }
@@ -335,11 +362,11 @@ export default function FleetManager({ importOpen, onCloseImport }: { importOpen
 
     {importOpen && <div className={styles.modalLayer} role="dialog" aria-modal="true" aria-labelledby="fleet-import-title"><button className={styles.backdrop} onClick={onCloseImport} aria-label="Zamknij import" /><section className={styles.modal}>
       <header><div><span>Import danych</span><h2 id="fleet-import-title">Dodaj lub zaktualizuj flotę</h2></div><button onClick={onCloseImport} aria-label="Zamknij"><X size={21} /></button></header>
-      <p className={styles.intro}>Wymagane pola: <strong>marka, model, nr rej., klient oraz data i czas przekazania</strong>.</p>
+      <p className={styles.intro}>Wymagane pola: <strong>marka, model, nr rej., klient oraz data i czas przekazania</strong>. Opcjonalnie: data końca umowy, e-mail i NIP/PESEL klienta.</p>
       <div className={styles.importActions}><label><input type="file" accept=".csv,text/csv,.xml,application/xml,text/xml" onChange={handleImportFile} /><span><Upload size={23} /><strong>Wybierz CSV lub XML</strong><small>Maksymalnie 5 MB</small></span></label><button onClick={downloadTemplate}><Download size={19} /><span><strong>Pobierz szablon CSV</strong><small>Gotowe nazwy kolumn</small></span></button></div>
       {error && <div className={styles.error} role="alert"><CircleAlert size={18} /><span><strong>Nie można zaimportować pliku</strong><small>{error}</small></span></div>}
       {imported !== null && <div className={styles.success}><CheckCircle2 size={18} />Zaimportowano {imported} {pluralizePojazd(imported)}.</div>}
-      {preview.length > 0 && <div className={styles.preview}><div className={styles.previewHeader}><div><h3>Podgląd importu</h3><span>{fileName}</span></div><strong>{preview.length} wierszy</strong></div>{invalidRows.length > 0 && <div className={styles.error}><CircleAlert size={18} /><span><strong>{invalidRows.length} niekompletnych wierszy</strong><small>Uzupełnij wymagane pola w pliku i załaduj go ponownie.</small></span></div>}<div className={styles.previewTable}><table><thead><tr><th>Marka / model</th><th>Nr rej.</th><th>Klient</th><th>Data i czas</th></tr></thead><tbody>{preview.slice(0, 5).map((row) => <tr key={row.id}><td>{row.brand} {row.model}</td><td>{row.registration}</td><td>{row.customer}</td><td>{row.assignedAt}</td></tr>)}</tbody></table></div></div>}
+      {preview.length > 0 && <div className={styles.preview}><div className={styles.previewHeader}><div><h3>Podgląd importu</h3><span>{fileName}</span></div><strong>{preview.length} wierszy</strong></div>{invalidRows.length > 0 && <div className={styles.error}><CircleAlert size={18} /><span><strong>{invalidRows.length} niekompletnych wierszy</strong><small>Uzupełnij wymagane pola oraz popraw zakresy dat w pliku i załaduj go ponownie.</small></span></div>}<div className={styles.previewTable}><table><thead><tr><th>Marka / model</th><th>Nr rej.</th><th>Klient</th><th>Umowa od</th><th>Umowa do</th></tr></thead><tbody>{preview.slice(0, 5).map((row) => <tr key={row.id}><td>{row.brand} {row.model}</td><td>{row.registration}</td><td>{row.customer}</td><td>{row.assignedAt}</td><td>{row.validTo || "—"}</td></tr>)}</tbody></table></div></div>}
       <footer><button className={styles.cancel} onClick={onCloseImport}>Anuluj</button><button className={styles.confirm} disabled={preview.length === 0 || invalidRows.length > 0 || importing} onClick={confirmImport}>{importing ? "Importuję…" : `Importuj ${preview.length > 0 ? `${preview.length} ${pluralizePojazd(preview.length)}` : "flotę"}`}</button></footer>
     </section></div>}
   </>;

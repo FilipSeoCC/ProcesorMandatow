@@ -48,3 +48,7 @@ next-env.d.ts
 # graphify local output and machine-specific hook command
 /graphify-out/
 /.codex/hooks.json
+
+# local client exports and generated fleet-import files
+/client-import/
+/import-floty-klienta*.csv

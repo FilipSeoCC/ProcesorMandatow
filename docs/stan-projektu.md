@@ -1,6 +1,6 @@
 # Stan projektu FlotaFlow — brief dla kolejnego agenta
 
-Stan na **2026-08-02**. Ten plik opisuje, co jest zrobione, co jest zepsute i co
+Stan na **2026-08-11**. Ten plik opisuje, co jest zrobione, co jest zepsute i co
 czeka. Zacznij od niego, potem `AGENTS.md` i `.agents/log.md` (szczegóły
 techniczne, chronologicznie).
 
@@ -68,7 +68,11 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
   (`/api/internal/documents/rematch`).
 - Flota i pracownicy — realny zapis do bazy, edycja, import CSV/XML floty.
   Przypisanie klienta do pojazdu ma opcjonalną datę końca umowy (nie tylko
-  początku) — puste pole = umowa otwarta jak dotychczas.
+  początku) — puste pole = umowa otwarta jak dotychczas. Import przyjmuje też
+  opcjonalnie e-mail i NIP/PESEL klienta. `scripts/map-client-fleet-import.mjs`
+  scala trzy typowe eksporty klienta (pojazdy, klienci i przypisania) do jednego
+  pliku zgodnego z importerem; szczegóły uruchomienia pokazuje `--help`/komunikat
+  walidacji, a test regresji działa przez `npm run test:fleet-import`.
 - Generowanie wezwania PDF, pakietu do pracownika i pisma do urzędu.
 - Log audytowy, zgłaszanie błędów ze zrzutem ekranu (stały przycisk w lewym
   dolnym rogu, nad kartą konta — dla każdej roli; lista/panel zgłoszeń w
@@ -84,6 +88,12 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
   loguje się, dopóki admin/boss nie nada mu roli. Zarządzanie kontami/rolami
   scalone z widokiem **Pracownicy** (tabela kont, widoczna dla admin/boss;
   kierowcy widoczni dla wszystkich) — 3 role: `admin`/`boss`/`user`.
+- Sesja jest trzymana wyłącznie w ciasteczkach HttpOnly i odświeżana przez
+  `PUT /api/auth` co 10 minut oraz po powrocie do aktywnej karty. Odświeżenie
+  ponownie sprawdza aktywne członkostwo i AAL2; nie omija akceptacji konta ani MFA.
+- Ponowne OCR jest dozwolone tylko przed zatwierdzeniem sprawy. API blokuje retry
+  dla `confirmed_at`/`resolved_at`, a UI nie pokazuje wtedy przycisku, żeby wynik
+  OCR nie nadpisał danych, na podstawie których przygotowano korespondencję.
 - Planer tras oparty o Google Route Optimization.
 - Pełna aplikacja na telefonie — te same funkcje co na desktopie.
 
