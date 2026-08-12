@@ -27,11 +27,12 @@ This project has a knowledge graph at graphify-out/ with god nodes, community st
 
 **One-time setup per machine** (the skill instructions in `.claude/skills/graphify/` and `.codex/skills/graphify/` are committed and shared between agents, but the CLI engine itself is a local dependency, same as `node_modules` — it isn't and shouldn't be committed): `pip install graphifyy` (use `pipx install graphifyy` if plain `pip` fails with an externally-managed-environment error). No need to run `graphify install` again if the skill folder for your agent already exists in this repo. `graphify-out/` itself (the actual graph data) is gitignored and regenerated locally per agent/session — cheap to rebuild (`graphify update .`, AST-only, no API cost), so there's no shared graph state to sync, only the shared know-how of how to build and query one.
 
-When the user types `$graphify`, use the installed graphify skill or instructions before doing anything else.
+When the user types `/graphify`, use the installed graphify skill or instructions before doing anything else.
 
 Rules:
 - For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
 - Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- After modifying code, run `graphify update .` before committing (AST-only, no API cost). Commit the portable `graphify-out/` files together with the code so Codex and Claude receive the same graph after pulling the branch.
+- Do not commit Graphify caches, backups, `graph.html`, `.graphify_python`, `.graphify_root` or local hook configuration; these remain machine-specific. On a new clone run `graphify hook install` once.

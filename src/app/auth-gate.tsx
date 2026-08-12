@@ -29,18 +29,13 @@ function readOnboardingData(value: unknown): OnboardingData | null {
 }
 
 export default function AuthGate({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = useState<"loading" | "guest" | "mfa" | "ready">("loading");
+  const [status, setStatus] = useState<"loading" | "guest" | "ready">("loading");
   const [mode, setMode] = useState<"sign-in" | "sign-up" | "reset">("sign-in");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [onboardingData, setOnboardingData] = useState<OnboardingData | null>(null);
-  const [mfaEnrollmentRequired, setMfaEnrollmentRequired] = useState(false);
-  const [mfaFactorId, setMfaFactorId] = useState("");
-  const [mfaQrCode, setMfaQrCode] = useState("");
-  const [mfaSecret, setMfaSecret] = useState("");
-  const [mfaCode, setMfaCode] = useState("");
 
   function switchMode(next: "sign-in" | "sign-up" | "reset") {
     setMode(next);
@@ -63,17 +58,7 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
         setStatus("ready");
         return;
       }
-      const mfaResponse = await fetch("/api/auth/mfa", {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      if (!mfaResponse.ok) {
-        setStatus("guest");
-        return;
-      }
-      const mfa = (await mfaResponse.json()) as { enrollmentRequired?: boolean };
-      setMfaEnrollmentRequired(Boolean(mfa.enrollmentRequired));
-      setStatus("mfa");
+      setStatus("guest");
     }
     checkSession()
       .catch(() => setStatus("guest"))
@@ -99,20 +84,9 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
           cache: "no-store",
         });
         const result = (await response.json().catch(() => ({}))) as {
-          mfaRequired?: boolean;
-          enrollmentRequired?: boolean;
           onboarding?: unknown;
         };
         if (!active) return;
-        if (result.mfaRequired) {
-          setMfaEnrollmentRequired(Boolean(result.enrollmentRequired));
-          setMfaFactorId("");
-          setMfaQrCode("");
-          setMfaSecret("");
-          setMfaCode("");
-          setStatus("mfa");
-          return;
-        }
         if (response.status === 401 || response.status === 403) {
           setOnboardingData(null);
           setStatus("guest");
@@ -185,14 +159,6 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     });
     const result = await response.json().catch(() => ({}));
     setSubmitting(false);
-    if (result.mfaRequired) {
-      setMfaEnrollmentRequired(Boolean(result.enrollmentRequired));
-      setMfaFactorId("");
-      setMfaQrCode("");
-      setMfaCode("");
-      setStatus("mfa");
-      return;
-    }
     if (response.ok && !result.confirmationRequired && !result.pendingApproval) {
       setOnboardingData(readOnboardingData(result.onboarding));
       setStatus("ready");
@@ -205,115 +171,10 @@ export default function AuthGate({ children }: { children: React.ReactNode }) {
     setError(result.error || "Nie udało się połączyć z usługą logowania.");
   }
 
-  async function beginMfaEnrollment() {
-    setSubmitting(true);
-    setError(null);
-    const response = await fetch("/api/auth/mfa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "enroll" }),
-    });
-    const result = await response.json().catch(() => ({}));
-    setSubmitting(false);
-    if (!response.ok) {
-      setError(result.error || "Nie udało się rozpocząć konfiguracji MFA.");
-      return;
-    }
-    setMfaFactorId(result.factorId ?? "");
-    setMfaQrCode(result.qrCode ?? "");
-    setMfaSecret(result.secret ?? "");
-  }
-
-  async function verifyMfa(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    const response = await fetch("/api/auth/mfa", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "verify", factorId: mfaFactorId, code: mfaCode }),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      setSubmitting(false);
-      setError(result.error || "Nieprawidłowy kod MFA.");
-      return;
-    }
-    const session = await fetch("/api/auth", { cache: "no-store" });
-    const sessionData = await session.json().catch(() => ({}));
-    setSubmitting(false);
-    if (!session.ok) {
-      setError("Sesja MFA nie została aktywowana. Zaloguj się ponownie.");
-      setStatus("guest");
-      return;
-    }
-    setOnboardingData(readOnboardingData(sessionData.onboarding));
-    setStatus("ready");
-  }
-
   if (status === "loading")
     return <main className={styles.loading}><LoaderCircle /><span>Sprawdzamy bezpieczną sesję…</span></main>;
   if (status === "ready")
     return <OnboardingGate initialData={onboardingData}>{children}</OnboardingGate>;
-  if (status === "mfa")
-    return (
-      <main className={styles.page}>
-        <section className={styles.card}>
-          <BrandHeader />
-          <div className={styles.intro}>
-            <span><ShieldCheck size={20} /></span>
-            <h1>Weryfikacja dwuetapowa</h1>
-            <p>
-              {mfaEnrollmentRequired && !mfaQrCode
-                ? "Konto administratora lub bossa wymaga ochrony kodem TOTP."
-                : "Wpisz sześciocyfrowy kod z aplikacji uwierzytelniającej."}
-            </p>
-          </div>
-          {mfaEnrollmentRequired && !mfaQrCode ? (
-            <button className={styles.submit} disabled={submitting} onClick={beginMfaEnrollment}>
-              {submitting ? <LoaderCircle className={styles.spin} /> : <ShieldCheck size={19} />}
-              Skonfiguruj MFA
-            </button>
-          ) : (
-            <form onSubmit={verifyMfa}>
-              {mfaQrCode && (
-                <div className={styles.mfaSetup}>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={mfaQrCode} alt="Kod QR do konfiguracji MFA" />
-                  <p>Zeskanuj kod w Google Authenticator, Microsoft Authenticator lub 1Password.</p>
-                  {mfaSecret && <code>{mfaSecret}</code>}
-                </div>
-              )}
-              <label>Kod jednorazowy
-                <input
-                  value={mfaCode}
-                  onChange={(event) => setMfaCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  pattern="[0-9]{6}"
-                  maxLength={6}
-                  required
-                />
-              </label>
-              {error && <p className={styles.error} role="alert">{error}</p>}
-              <button className={styles.submit} disabled={submitting || mfaCode.length !== 6}>
-                {submitting ? <LoaderCircle className={styles.spin} /> : <ShieldCheck size={19} />}
-                Potwierdź kod
-              </button>
-            </form>
-          )}
-          {error && mfaEnrollmentRequired && !mfaQrCode && <p className={styles.error}>{error}</p>}
-          <button
-            className={styles.switch}
-            onClick={async () => {
-              await fetch("/api/auth/mfa", { method: "DELETE" });
-              setStatus("guest");
-            }}
-          >Wróć do logowania</button>
-        </section>
-      </main>
-    );
-
   return (
     <main className={styles.page}>
       <section className={styles.card}>

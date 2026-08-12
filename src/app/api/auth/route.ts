@@ -6,11 +6,8 @@ import {
   rateLimitedResponse,
 } from "@/lib/auth-rate-limit";
 import {
-  clearPendingMfaCookies,
   clearSessionCookies,
   cookieValue,
-  jwtAssuranceLevel,
-  setPendingMfaCookies,
   setSessionCookies,
   type AuthTokens,
 } from "@/lib/auth-session";
@@ -20,12 +17,10 @@ import { adminHeaders, getSupabaseServerEnv } from "@/lib/supabase-env";
 
 export const runtime = "nodejs";
 
-type Factor = { id?: string; factor_type?: string; status?: string };
 type AuthSession = AuthTokens & {
   user?: {
     id?: string;
     email?: string;
-    factors?: Factor[];
     user_metadata?: {
       first_name?: string;
       last_name?: string;
@@ -202,14 +197,13 @@ export async function PUT(request: Request) {
     );
     if (invalidSession) {
       clearSessionCookies(response);
-      clearPendingMfaCookies(response);
     }
     return response;
   }
 
   // Fetch the current user explicitly. Apart from validating the freshly
-  // rotated access token, this keeps MFA factors and onboarding metadata
-  // authoritative even if a token refresh response omits part of `user`.
+  // rotated access token, this keeps onboarding metadata authoritative even
+  // if a token refresh response omits part of `user`.
   const userResponse = await fetch(`${url}/auth/v1/user`, {
     headers: {
       apikey: publishableKey,
@@ -232,7 +226,6 @@ export async function PUT(request: Request) {
       { status: 401 },
     );
     clearSessionCookies(response);
-    clearPendingMfaCookies(response);
     return response;
   }
 
@@ -252,7 +245,6 @@ export async function PUT(request: Request) {
       { status: 403 },
     );
     clearSessionCookies(response);
-    clearPendingMfaCookies(response);
     return response;
   }
 
@@ -262,23 +254,6 @@ export async function PUT(request: Request) {
     expires_in: refreshed.expires_in,
     user,
   };
-  const verifiedFactor = user.factors?.some(
-    (factor) => factor.factor_type === "totp" && factor.status === "verified",
-  );
-  const privileged = member.role === "admin" || member.role === "boss";
-  if (
-    (privileged || verifiedFactor) &&
-    jwtAssuranceLevel(session.access_token) !== "aal2"
-  ) {
-    const response = NextResponse.json({
-      mfaRequired: true,
-      enrollmentRequired: privileged && !verifiedFactor,
-      email: user.email ?? null,
-    });
-    setPendingMfaCookies(response, session);
-    return response;
-  }
-
   const metadata = user.user_metadata;
   const response = NextResponse.json({
     authenticated: true,
@@ -489,20 +464,6 @@ export async function POST(request: Request) {
       { status: 403 },
     );
 
-  const verifiedFactor = authData.user?.factors?.some(
-    (factor) => factor.factor_type === "totp" && factor.status === "verified",
-  );
-  const privileged = member.role === "admin" || member.role === "boss";
-  if ((privileged || verifiedFactor) && jwtAssuranceLevel(authData.access_token) !== "aal2") {
-    const response = NextResponse.json({
-      mfaRequired: true,
-      enrollmentRequired: privileged && !verifiedFactor,
-      email: authData.user?.email ?? email,
-    });
-    setPendingMfaCookies(response, authData as AuthSession);
-    return response;
-  }
-
   const metadata = authData.user?.user_metadata;
   const response = NextResponse.json({
     authenticated: true,
@@ -529,6 +490,5 @@ export async function POST(request: Request) {
 export async function DELETE() {
   const response = NextResponse.json({ authenticated: false });
   clearSessionCookies(response);
-  clearPendingMfaCookies(response);
   return response;
 }

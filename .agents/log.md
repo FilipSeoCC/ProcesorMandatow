@@ -446,3 +446,22 @@ Separately (different repo, mentioned here only because it came up in the same s
 - Installed `graphifyy` locally and ran `graphify install` for this Claude Code account — found `.gitignore` blanket-excluded `.claude/`, so a Claude-side skill never actually reaches git the way `.codex/skills/graphify/` does. Carved out `.claude/skills/` as tracked (same pattern as `.codex/`) and committed the skill there too, plus a one-time-setup note in `AGENTS.md` (`pip install graphifyy`, per machine — the skill instructions are shared, the CLI engine isn't, same as `node_modules`) (commit `56c16ac`).
 - Ran `graphify . --code-only` + `cluster-only` locally to confirm the setup works: 581 nodes, 1264 edges, 46 communities. Top god nodes match what manual review already found: `getSupabaseServerEnv()` (98 edges), `adminHeaders()` (83), `verifyMember()` (79).
 - Verified: `tsc --noEmit`, eslint (scoped to changed file), full `npm run build` — all clean before each push. `SUPABASE_DB_URL` not set locally, so the build's migration step correctly no-ops rather than touching the real database.
+
+## 2026-08-12 — Codex — Domknięcie integracji Graphify
+- Zaktualizowano izolowane narzędzie Graphify oraz globalne i projektowe skille Codex/Claude z `0.9.39` do `0.9.40`; nie dodano zależności do aplikacji ani runtime Vercel.
+- Zainstalowano wspólne hooki Git `post-commit` i `post-checkout` oraz sterownik merge dla `graphify-out/graph.json`; projektowy `.gitattributes` deklaruje `merge=graphify`.
+- Pełny update i diagnostyka potwierdziły 805 węzłów, 1495 relacji i 64 społeczności, bez brakujących końców relacji, self-loopów i duplikatów. Zapytania o aktualne symbole `membershipLookupByUserId()` oraz `buildImportRows()` działają.
+- `built_at_commit` jest zgodny z aktualnym HEAD (`46c714a`), a wszystkie 64 społeczności mają niepuste, nieplaceholderowe nazwy.
+- Poprawiono model współpracy dwóch agentów: repo ma przechowywać przenośne `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, analizę oraz etykiety. Cache, backupy, HTML, ścieżka interpretera i lokalne hooki pozostają ignorowane; po zmianie kodu agent aktualizuje graf przed commitem i publikuje go razem z kodem.
+
+## 2026-08-12 — Codex — Wycofanie MFA/TOTP
+- Na życzenie Filipa usunięto ekran konfiguracji i weryfikacji MFA, endpoint `/api/auth/mfa` oraz warunki AAL2 z logowania, odświeżania sesji i serwerowego `verifyMember()`.
+- Logowanie wszystkich ról ponownie kończy się po poprawnym e-mailu i haśle. Pozostają: bezpieczne ciasteczka HttpOnly, limity prób, polityka haseł, potwierdzenie e-maila oraz obowiązkowa akceptacja konta i roli przez `boss`/`admin`.
+- `clearSessionCookies()` usuwa także stare tymczasowe ciasteczka `ff-mfa-*`, żeby użytkownicy rozpoczęci w poprzednim flow nie utknęli po wdrożeniu.
+- Dodano migrację `20260812000000_remove_mfa_requirement.sql`, która usuwa AAL2 z funkcji RLS bez osłabiania kontroli aktywnego członkostwa i roli. Na produkcji trzeba zastosować tę migrację po wcześniejszej migracji bezpieczeństwa.
+- Weryfikacja lokalna: ESLint, TypeScript, test detekcji urzędu (5/5) i test importu floty przechodzą. Produkcyjny build doszedł do pobierania `Inter`, ale w sandboxie nie miał dostępu do `fonts.googleapis.com`; nie był to błąd kodu MFA.
+
+## 2026-08-12 — Claude — Merge wycofania MFA/TOTP do main
+- Zmergowano branch `codex/user-onboarding` (commit `2276d70`) do `main` na wyraźną prośbę Filipa ("nie chce tego zabezpieczneia mfa miec dzis") — usuwa to wymóg AAL2/TOTP dla admin/boss z `verifyMember()`, logowania i odświeżania sesji.
+- Konflikty tylko w `AGENTS.md` (trigger skill graphify `$graphify` vs `/graphify` — zostawiono `/graphify`, zgodnie z globalną konwencją Filipa) i `.agents/log.md` (kolejność wpisów, scalono chronologicznie).
+- **Ważne dla wdrożenia**: migracja `supabase/migrations/20260812000000_remove_mfa_requirement.sql` NIE jest jeszcze zaaplikowana na produkcyjnej bazie Supabase — trzeba ją ręcznie uruchomić po tym mergu, inaczej kod przestanie wymagać AAL2, ale funkcje RLS `is_org_member`/`has_org_role` w bazie nadal będą w wersji z AAL2 (a mandatory-MFA-adding commit `0780626` już wcześniej trafił na main/produkcję, więc AAL2 może być aktywne na produkcji do momentu zastosowania tej migracji).
