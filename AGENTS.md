@@ -25,6 +25,8 @@ Entry format:
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
 
+**One-time setup per machine** (the skill instructions in `.claude/skills/graphify/` and `.codex/skills/graphify/` are committed and shared between agents, but the CLI engine itself is a local dependency, same as `node_modules` — it isn't and shouldn't be committed): `pip install graphifyy` (use `pipx install graphifyy` if plain `pip` fails with an externally-managed-environment error). No need to run `graphify install` again if the skill folder for your agent already exists in this repo. `graphify-out/` itself (the actual graph data) is gitignored and regenerated locally per agent/session — cheap to rebuild (`graphify update .`, AST-only, no API cost), so there's no shared graph state to sync, only the shared know-how of how to build and query one.
+
 When the user types `$graphify`, use the installed graphify skill or instructions before doing anything else.
 
 Rules:

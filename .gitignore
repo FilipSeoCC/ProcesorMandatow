@@ -42,8 +42,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# claude code local dev config
-.claude/
+# claude code local dev config (skills are shared with the team, see below —
+# mirrors how .codex/ is tracked except for its machine-specific hooks.json)
+.claude/*
+!.claude/skills/
 
 # graphify local output and machine-specific hook command
 /graphify-out/
