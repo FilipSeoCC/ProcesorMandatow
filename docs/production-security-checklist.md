@@ -3,7 +3,7 @@
 ## Przed wpuszczeniem pracowników
 
 - Wyłącz publiczną rejestrację i wdroż zaproszenia wysyłane wyłącznie przez administratora.
-- W Supabase Auth włącz potwierdzanie adresu e-mail oraz MFA (TOTP) dla administratorów.
+- W Supabase Auth włącz potwierdzanie adresu e-mail; aplikacja używa logowania e-mail + hasło bez MFA.
 - W Vercel ustaw ochronę przed nadużyciami dla `POST /api/auth` i limit żądań dla uploadu dokumentów.
 - Dodaj oddzielne środowisko Supabase i Vercel dla testów; produkcji nie używa się do testowania zmian.
 - Włącz alerty błędów Vercel i skonfiguruj retencję logów zgodną z polityką firmy.

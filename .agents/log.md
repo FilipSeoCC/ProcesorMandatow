@@ -439,3 +439,17 @@ Separately (different repo, mentioned here only because it came up in the same s
 - `POST /api/documents/[id]/retry` blokuje ponowne OCR zatwierdzonych i zrealizowanych spraw również po bezpośrednim wywołaniu API. Wszystkie zapisy wyniku OCR mają dodatkowo atomowy filtr `confirmed_at IS NULL AND resolved_at IS NULL`, więc nawet zatwierdzenie sprawy w trakcie analizy nie pozwoli późniejszemu wynikowi nadpisać zaakceptowanych danych. UI ukrywa wtedy przycisk retry i pokazuje wynik/błąd uruchomienia jako toast.
 - Dodano `scripts/map-client-fleet-import.mjs`: łączy eksporty pojazdów, klientów i przypisań, rozpoznaje polskie/angielskie nagłówki, normalizuje rejestracje i daty Europe/Warsaw, zachowuje koniec umowy, e-mail oraz NIP/PESEL. Importer CSV/XML i szablon aplikacji obsługują teraz te opcjonalne kolumny. Lokalne eksporty są ignorowane przez Git.
 - Weryfikacja: `npm run test:fleet-import`, `npm run test:authority`, `npm run lint`, `npx tsc --noEmit` i pełny `npx next build` są czyste. Graphify zaktualizowany do 804 węzłów / 1494 krawędzi / 67 społeczności.
+
+## 2026-08-12 — Codex — Domknięcie integracji Graphify
+- Zaktualizowano izolowane narzędzie Graphify oraz globalne i projektowe skille Codex/Claude z `0.9.39` do `0.9.40`; nie dodano zależności do aplikacji ani runtime Vercel.
+- Zainstalowano wspólne hooki Git `post-commit` i `post-checkout` oraz sterownik merge dla `graphify-out/graph.json`; projektowy `.gitattributes` deklaruje `merge=graphify`.
+- Pełny update i diagnostyka potwierdziły 805 węzłów, 1495 relacji i 64 społeczności, bez brakujących końców relacji, self-loopów i duplikatów. Zapytania o aktualne symbole `membershipLookupByUserId()` oraz `buildImportRows()` działają.
+- `built_at_commit` jest zgodny z aktualnym HEAD (`46c714a`), a wszystkie 64 społeczności mają niepuste, nieplaceholderowe nazwy.
+- Poprawiono model współpracy dwóch agentów: repo ma przechowywać przenośne `graph.json`, `GRAPH_REPORT.md`, `manifest.json`, analizę oraz etykiety. Cache, backupy, HTML, ścieżka interpretera i lokalne hooki pozostają ignorowane; po zmianie kodu agent aktualizuje graf przed commitem i publikuje go razem z kodem.
+
+## 2026-08-12 — Codex — Wycofanie MFA/TOTP
+- Na życzenie Filipa usunięto ekran konfiguracji i weryfikacji MFA, endpoint `/api/auth/mfa` oraz warunki AAL2 z logowania, odświeżania sesji i serwerowego `verifyMember()`.
+- Logowanie wszystkich ról ponownie kończy się po poprawnym e-mailu i haśle. Pozostają: bezpieczne ciasteczka HttpOnly, limity prób, polityka haseł, potwierdzenie e-maila oraz obowiązkowa akceptacja konta i roli przez `boss`/`admin`.
+- `clearSessionCookies()` usuwa także stare tymczasowe ciasteczka `ff-mfa-*`, żeby użytkownicy rozpoczęci w poprzednim flow nie utknęli po wdrożeniu.
+- Dodano migrację `20260812000000_remove_mfa_requirement.sql`, która usuwa AAL2 z funkcji RLS bez osłabiania kontroli aktywnego członkostwa i roli. Na produkcji trzeba zastosować tę migrację po wcześniejszej migracji bezpieczeństwa.
+- Weryfikacja lokalna: ESLint, TypeScript, test detekcji urzędu (5/5) i test importu floty przechodzą. Produkcyjny build doszedł do pobierania `Inter`, ale w sandboxie nie miał dostępu do `fonts.googleapis.com`; nie był to błąd kodu MFA.

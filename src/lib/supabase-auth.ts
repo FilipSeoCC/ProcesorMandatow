@@ -1,5 +1,4 @@
 import "server-only";
-import { jwtAssuranceLevel } from "@/lib/auth-session";
 import { getSupabaseServerEnv } from "@/lib/supabase-env";
 
 // Simplified to 3 roles (Filip's call): admin = full access incl. team/role
@@ -69,7 +68,6 @@ export async function verifyMember(
       onboarding_step?: number | string;
       onboarding_completed_at?: string;
     };
-    factors?: Array<{ factor_type?: string; status?: string }>;
   };
   if (!user.id) return null;
 
@@ -88,12 +86,6 @@ export async function verifyMember(
   }>;
   const membership = memberships[0];
   if (!membership || !allowed.includes(membership.role)) return null;
-  const verifiedFactor = user.factors?.some(
-    (factor) => factor.factor_type === "totp" && factor.status === "verified",
-  );
-  const requiresAal2 =
-    membership.role === "admin" || membership.role === "boss" || verifiedFactor;
-  if (requiresAal2 && jwtAssuranceLevel(accessToken) !== "aal2") return null;
   const onboardingVersion =
     user.user_metadata?.onboarding_version == null
       ? Number.NaN

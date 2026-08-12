@@ -90,7 +90,7 @@ Miejsca, które warto znać, zanim cokolwiek ruszysz:
   kierowcy widoczni dla wszystkich) — 3 role: `admin`/`boss`/`user`.
 - Sesja jest trzymana wyłącznie w ciasteczkach HttpOnly i odświeżana przez
   `PUT /api/auth` co 10 minut oraz po powrocie do aktywnej karty. Odświeżenie
-  ponownie sprawdza aktywne członkostwo i AAL2; nie omija akceptacji konta ani MFA.
+  ponownie sprawdza aktywne członkostwo; nie omija akceptacji konta.
 - Ponowne OCR jest dozwolone tylko przed zatwierdzeniem sprawy. API blokuje retry
   dla `confirmed_at`/`resolved_at`, a UI nie pokazuje wtedy przycisku, żeby wynik
   OCR nie nadpisał danych, na podstawie których przygotowano korespondencję.
@@ -136,20 +136,21 @@ jedynym adminem w organizacji.
 
 - sesje aplikacji są przenoszone wyłącznie w ciasteczkach HttpOnly; frontend
   nie odczytuje już tokenów Supabase z `localStorage`,
-- logowanie, reset hasła, zmiana hasła i MFA mają licznik prób w bazie
+- logowanie, reset hasła i zmiana hasła mają licznik prób w bazie
   (`20260811000000_auth_security.sql`),
 - nowe hasła mają 12–128 znaków, blokadę prostych haseł i kontrolę przez
   Have I Been Pwned w trybie k-anonimowym,
 - zmiana hasła w ustawieniach wymaga podania obecnego hasła,
-- `admin` i `boss` muszą skonfigurować TOTP i logować się na poziomie AAL2;
-  zwykły `user` pozostaje przy haśle, dopóki sam nie ma aktywnego MFA,
+- decyzją produktową z 2026-08-12 wszystkie role logują się przez e-mail i
+  hasło bez MFA/TOTP; migracja `20260812000000_remove_mfa_requirement.sql`
+  usuwa warunek AAL2 z funkcji RLS, pozostawiając sprawdzanie aktywnego konta i roli,
 - model rejestracji nie zmienił się: rejestracja jest publiczna, a konto
   wymaga potwierdzenia adresu e-mail i pozostaje `pending` do akceptacji przez
   `boss` lub `admin`.
 
-Po wdrożeniu kodu migracja bezpieczeństwa musi zostać zastosowana do
-produkcyjnego Supabase. Jeśli `SUPABASE_DB_URL` nie jest ustawione w Vercel,
-pipeline builda jej nie uruchomi.
+Po wdrożeniu kodu obie migracje bezpieczeństwa muszą zostać zastosowane do
+produkcyjnego Supabase w kolejności nazw plików. Jeśli `SUPABASE_DB_URL` nie
+jest ustawione w Vercel, pipeline builda ich nie uruchomi.
 
 ### 2. Zero testów
 
